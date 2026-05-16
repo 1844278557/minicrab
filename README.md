@@ -248,6 +248,7 @@ Connect nanobot to your favorite chat platform. Want to build your own? See the 
 
 | Channel | What you need |
 |---------|---------------|
+| **Web** | Local browser |
 | **Telegram** | Bot token from @BotFather |
 | **Discord** | Bot token + Message Content intent |
 | **WhatsApp** | QR code scan (`nanobot channels login whatsapp`) |
@@ -260,6 +261,42 @@ Connect nanobot to your favorite chat platform. Want to build your own? See the 
 | **QQ** | App ID + App Secret |
 | **Wecom** | Bot ID + Bot Secret |
 | **Mochat** | Claw token (auto-setup available) |
+
+<details>
+<summary><b>Web</b> (Local browser)</summary>
+
+The Web channel provides a local browser chat page. It is intended for local use and does not require a third-party chat account.
+
+**1. Configure**
+
+```json
+{
+  "channels": {
+    "web": {
+      "enabled": true,
+      "host": "127.0.0.1",
+      "port": 18790,
+      "allowFrom": ["*"]
+    }
+  }
+}
+```
+
+**2. Run**
+
+```bash
+nanobot gateway
+```
+
+**3. Open**
+
+```text
+http://127.0.0.1:18790/web
+```
+
+The first version supports one default browser conversation and basic message display.
+
+</details>
 
 <details>
 <summary><b>Telegram</b> (Recommended)</summary>
@@ -1674,6 +1711,7 @@ nanobot/
 │   └── tools/      #    Built-in tools (incl. spawn)
 ├── skills/         # 🎯 Bundled skills (github, weather, tmux...)
 ├── channels/       # 📱 Chat channel integrations (supports plugins)
+├── templates/web/  # 🌐 Local browser chat page
 ├── bus/            # 🚌 Message routing
 ├── cron/           # ⏰ Scheduled tasks
 ├── heartbeat/      # 💓 Proactive wake-up
