@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from loguru import logger
 
+from nanobot.agent.approval import ApprovalManager
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.episode import EpisodeStore
 from nanobot.agent.hook import AgentHook, AgentHookContext
@@ -108,6 +109,7 @@ class AgentLoop:
         self._last_usage: dict[str, int] = {}
 
         self.context = ContextBuilder(workspace, timezone=timezone)
+        self.approvals = ApprovalManager(workspace)
         self.sessions = session_manager or SessionManager(workspace)
         self.tools = ToolRegistry()
         self.runner = AgentRunner(provider)
@@ -287,6 +289,7 @@ class AgentLoop:
         channel: str = "cli",
         chat_id: str = "direct",
         message_id: str | None = None,
+        session_key: str | None = None,
     ) -> tuple[str | None, list[str], list[dict]]:
         """Run the agent iteration loop.
 
@@ -343,6 +346,13 @@ class AgentLoop:
             hook=_LoopHook(),
             error_message="Sorry, I encountered an error calling the AI model.",
             concurrent_tools=True,
+            approval_callback=lambda tool_call: self.approvals.request(
+                session_key=session_key or f"{channel}:{chat_id}",
+                channel=channel,
+                chat_id=chat_id,
+                tool_name=tool_call.name,
+                arguments=tool_call.arguments if isinstance(tool_call.arguments, dict) else {},
+            ),
         ))
         self._last_usage = result.usage
         if result.stop_reason == "max_iterations":
@@ -498,6 +508,7 @@ class AgentLoop:
             final_content, _, all_msgs = await self._run_agent_loop(
                 messages, channel=channel, chat_id=chat_id,
                 message_id=msg.metadata.get("message_id"),
+                session_key=key,
             )
             self._save_turn(session, all_msgs, 1 + len(history))
             self.sessions.save(session)
@@ -509,6 +520,10 @@ class AgentLoop:
         logger.info("Processing message from {}:{}: {}", msg.channel, msg.sender_id, preview)
 
         key = session_key or msg.session_key
+
+        if approval_response := await self._handle_approval_response(msg, key):
+            return approval_response
+
         session = self.sessions.get_or_create(key)
 
         # Slash commands
@@ -553,6 +568,7 @@ class AgentLoop:
             on_stream_end=on_stream_end,
             channel=msg.channel, chat_id=msg.chat_id,
             message_id=msg.metadata.get("message_id"),
+            session_key=key,
         )
 
         if final_content is None:
@@ -569,11 +585,47 @@ class AgentLoop:
         logger.info("Response to {}:{}: {}", msg.channel, msg.sender_id, preview)
 
         meta = dict(msg.metadata or {})
+        approval_meta = self.approvals.metadata_from_content(key, final_content)
+        if approval_meta:
+            meta["approval"] = approval_meta
         if on_stream is not None:
             meta["_streamed"] = True
         return OutboundMessage(
             channel=msg.channel, chat_id=msg.chat_id, content=final_content,
             metadata=meta,
+        )
+
+    async def _handle_approval_response(
+        self,
+        msg: InboundMessage,
+        session_key: str,
+    ) -> OutboundMessage | None:
+        """处理用户对待审核操作的同意或拒绝。"""
+        resolution = self.approvals.consume_response(session_key, msg.content)
+        if resolution is None:
+            return None
+        if resolution.status != "approved" or resolution.request is None:
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=resolution.message,
+                metadata=dict(msg.metadata or {}),
+            )
+
+        request = resolution.request
+        self._set_tool_context(
+            msg.channel,
+            msg.chat_id,
+            msg.metadata.get("message_id"),
+            sender_id=msg.sender_id,
+            session_key=session_key,
+        )
+        result = await self.tools.execute(request.tool_name, request.arguments)
+        return OutboundMessage(
+            channel=msg.channel,
+            chat_id=msg.chat_id,
+            content=f"已执行确认操作：{request.summary}\n\n结果：{result}",
+            metadata=dict(msg.metadata or {}),
         )
 
     @staticmethod
@@ -621,6 +673,55 @@ class AgentLoop:
             filtered.append(block)
 
         return filtered
+
+    def get_session_history(self, session_key: str, limit: int = 100) -> list[dict[str, str]]:
+        """返回适合 Web 页面展示的最近会话历史。"""
+        try:
+            safe_limit = max(0, min(int(100 if limit is None else limit), 100))
+        except (TypeError, ValueError):
+            safe_limit = 100
+        if safe_limit == 0:
+            return []
+        session = self.sessions.get_or_create(session_key)
+        visible: list[dict[str, str]] = []
+        for message in session.messages:
+            role = message.get("role")
+            if role not in {"user", "assistant"}:
+                continue
+            if message.get("tool_calls"):
+                continue
+            content = self._history_text(message.get("content"))
+            if not content:
+                continue
+            visible.append({
+                "role": str(role),
+                "content": content,
+                "timestamp": str(message.get("timestamp") or ""),
+            })
+        return visible[-safe_limit:]
+
+    @staticmethod
+    def _history_text(content: Any) -> str:
+        """把 session 中的消息内容转成 Web 历史可展示文本。"""
+        if isinstance(content, str):
+            text = content
+            if text.startswith(ContextBuilder._RUNTIME_CONTEXT_TAG):
+                parts = text.split("\n\n", 1)
+                text = parts[1] if len(parts) > 1 else ""
+            return text.strip()
+
+        if isinstance(content, list):
+            parts: list[str] = []
+            for block in content:
+                if (
+                    isinstance(block, dict)
+                    and block.get("type") in {"text", "input_text", "output_text"}
+                    and isinstance(block.get("text"), str)
+                ):
+                    parts.append(block["text"])
+            return "\n".join(part.strip() for part in parts if part.strip()).strip()
+
+        return ""
 
     def _save_turn(self, session: Session, messages: list[dict], skip: int) -> None:
         """Save new-turn messages into session, truncating large tool results."""

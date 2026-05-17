@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
 
 from nanobot.agent.hook import AgentHook, AgentHookContext
 from nanobot.agent.tools.registry import ToolRegistry
@@ -34,6 +35,7 @@ class AgentRunSpec:
     max_iterations_message: str | None = None
     concurrent_tools: bool = False
     fail_on_tool_error: bool = False
+    approval_callback: Callable[[ToolCallRequest], Any] | None = None
 
 
 @dataclass(slots=True)
@@ -107,6 +109,25 @@ class AgentRunner:
 
                 await hook.before_execute_tools(context)
 
+                approval_event = await self._request_approval(spec, response.tool_calls)
+                if approval_event:
+                    final_content = str(approval_event.get("content") or "需要人工确认。")
+                    event = {
+                        "name": str(approval_event.get("tool_name") or response.tool_calls[0].name),
+                        "status": "approval_required",
+                        "detail": str(approval_event.get("summary") or "需要人工确认"),
+                        "approval_id": str(approval_event.get("approval_id") or ""),
+                    }
+                    tool_events.append(event)
+                    context.tool_results = [final_content]
+                    context.tool_events = [event]
+                    context.final_content = final_content
+                    context.stop_reason = "approval_required"
+                    stop_reason = "approval_required"
+                    messages.append(build_assistant_message(final_content))
+                    await hook.after_iteration(context)
+                    break
+
                 results, new_events, fatal_error = await self._execute_tools(
                     spec,
                     response.tool_calls,
@@ -175,6 +196,22 @@ class AgentRunner:
             error=error,
             tool_events=tool_events,
         )
+
+    async def _request_approval(
+        self,
+        spec: AgentRunSpec,
+        tool_calls: list[ToolCallRequest],
+    ) -> dict[str, Any] | None:
+        """在工具执行前检查是否需要人工确认。"""
+        if spec.approval_callback is None:
+            return None
+        for tool_call in tool_calls:
+            event = spec.approval_callback(tool_call)
+            if inspect.isawaitable(event):
+                event = await event
+            if event:
+                return event
+        return None
 
     async def _execute_tools(
         self,

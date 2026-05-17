@@ -94,6 +94,62 @@ def test_websocket_message_publishes_inbound_message() -> None:
     assert inbound.session_key == "web:default"
 
 
+def test_websocket_history_without_provider_returns_empty_list() -> None:
+    """没有历史读取回调时，Web 历史请求返回空列表。"""
+    channel = WebChannel({"enabled": True, "allowFrom": ["*"]}, MessageBus())
+    client = TestClient(channel.app)
+
+    with client.websocket_connect("/web/ws") as socket:
+        assert socket.receive_json() == {"type": "status", "content": "connected"}
+        socket.send_json({"type": "history", "limit": 100})
+
+        assert socket.receive_json() == {"type": "history", "messages": []}
+
+
+def test_websocket_history_uses_provider_and_caps_limit() -> None:
+    """Web 历史请求会调用 provider，并把 limit 限制到 100。"""
+    calls: list[tuple[str, int]] = []
+
+    def history_provider(session_key: str, limit: int) -> list[dict[str, str]]:
+        calls.append((session_key, limit))
+        return [{"role": "user", "content": f"m{i}", "timestamp": ""} for i in range(120)]
+
+    channel = WebChannel(
+        {"enabled": True, "allowFrom": ["*"]},
+        MessageBus(),
+        history_provider=history_provider,
+    )
+    client = TestClient(channel.app)
+
+    with client.websocket_connect("/web/ws?chat_id=custom") as socket:
+        assert socket.receive_json() == {"type": "status", "content": "connected"}
+        socket.send_json({"type": "history", "limit": 1000})
+        response = socket.receive_json()
+
+    assert calls == [("web:custom", 100)]
+    assert response["type"] == "history"
+    assert len(response["messages"]) == 100
+    assert response["messages"][0]["content"] == "m20"
+
+
+def test_websocket_history_zero_limit_returns_empty_list() -> None:
+    """limit 为 0 时不会返回全部历史。"""
+    channel = WebChannel(
+        {"enabled": True, "allowFrom": ["*"]},
+        MessageBus(),
+        history_provider=lambda _session_key, _limit: [
+            {"role": "user", "content": "hello", "timestamp": ""}
+        ],
+    )
+    client = TestClient(channel.app)
+
+    with client.websocket_connect("/web/ws") as socket:
+        assert socket.receive_json() == {"type": "status", "content": "connected"}
+        socket.send_json({"type": "history", "limit": 0})
+
+        assert socket.receive_json() == {"type": "history", "messages": []}
+
+
 @pytest.mark.asyncio
 async def test_send_pushes_outbound_message_to_browser_socket() -> None:
     """Agent 回复会被推送给已连接浏览器。"""
@@ -104,6 +160,38 @@ async def test_send_pushes_outbound_message_to_browser_socket() -> None:
     await channel.send(OutboundMessage(channel="web", chat_id="default", content="收到"))
 
     assert socket.sent == [{"type": "message", "role": "assistant", "content": "收到"}]
+
+
+@pytest.mark.asyncio
+async def test_send_pushes_approval_metadata_to_browser_socket() -> None:
+    """审批消息会把按钮所需元数据发给浏览器。"""
+    channel = WebChannel({"enabled": True, "allowFrom": ["*"]}, MessageBus())
+    socket = _FakeSocket()
+    channel._register("default", socket)  # type: ignore[arg-type]
+
+    await channel.send(OutboundMessage(
+        channel="web",
+        chat_id="default",
+        content="需要你确认",
+        metadata={
+            "approval": {
+                "id": "A-test",
+                "summary": "写入长期用户记忆",
+                "reason": "会写入 USER.md",
+            }
+        },
+    ))
+
+    assert socket.sent == [{
+        "type": "message",
+        "role": "assistant",
+        "content": "需要你确认",
+        "approval": {
+            "id": "A-test",
+            "summary": "写入长期用户记忆",
+            "reason": "会写入 USER.md",
+        },
+    }]
 
 
 @pytest.mark.asyncio
@@ -118,7 +206,7 @@ async def test_send_without_browser_does_not_raise() -> None:
 
 class _FakeSocket:
     def __init__(self) -> None:
-        self.sent: list[dict[str, str]] = []
+        self.sent: list[dict] = []
 
-    async def send_json(self, payload: dict[str, str]) -> None:
+    async def send_json(self, payload: dict) -> None:
         self.sent.append(payload)

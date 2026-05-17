@@ -298,7 +298,7 @@ nanobot gateway
 http://127.0.0.1:18790/web
 ```
 
-The first version supports one default browser conversation and basic message display.
+The first version supports one default browser conversation, server-side recent history loading, and approval buttons for risky actions.
 
 </details>
 

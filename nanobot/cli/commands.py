@@ -603,6 +603,9 @@ def gateway(
 
     # Create channel manager
     channels = ChannelManager(config, bus)
+    web_channel = channels.get_channel("web")
+    if web_channel and hasattr(web_channel, "set_history_provider"):
+        web_channel.set_history_provider(agent.get_session_history)
 
     def _pick_heartbeat_target() -> tuple[str, str]:
         """Pick a routable channel/chat target for heartbeat-triggered messages."""

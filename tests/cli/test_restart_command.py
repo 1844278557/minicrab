@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import tempfile
 import time
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from nanobot.bus.events import InboundMessage, OutboundMessage
+from nanobot.bus.events import InboundMessage
 from nanobot.providers.base import LLMResponse
 
 
@@ -20,13 +22,14 @@ def _make_loop():
     bus = MessageBus()
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
-    workspace = MagicMock()
-    workspace.__truediv__ = MagicMock(return_value=MagicMock())
+    tmpdir = tempfile.TemporaryDirectory()
+    workspace = Path(tmpdir.name)
 
     with patch("nanobot.agent.loop.ContextBuilder"), \
          patch("nanobot.agent.loop.SessionManager"), \
          patch("nanobot.agent.loop.SubagentManager"):
         loop = AgentLoop(bus=bus, provider=provider, workspace=workspace)
+    loop._test_tmpdir = tmpdir
     return loop, bus
 
 

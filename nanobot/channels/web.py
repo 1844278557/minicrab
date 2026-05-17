@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import inspect
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -40,14 +42,24 @@ class WebChannel(BaseChannel):
     def default_config(cls) -> dict[str, Any]:
         return WebConfig().model_dump(by_alias=True)
 
-    def __init__(self, config: Any, bus: MessageBus):
+    def __init__(
+        self,
+        config: Any,
+        bus: MessageBus,
+        history_provider: Callable[[str, int], Any] | None = None,
+    ):
         if isinstance(config, dict):
             config = WebConfig.model_validate(config)
         super().__init__(config, bus)
         self.config: WebConfig = config
+        self._history_provider = history_provider
         self._connections: dict[str, list[WebSocket]] = {}
         self._server: uvicorn.Server | None = None
         self.app = self._create_app()
+
+    def set_history_provider(self, provider: Callable[[str, int], Any] | None) -> None:
+        """设置 Web 历史读取回调。"""
+        self._history_provider = provider
 
     async def start(self) -> None:
         """启动 Web 渠道。"""
@@ -155,7 +167,15 @@ class WebChannel(BaseChannel):
         sender_id: str,
     ) -> None:
         """处理浏览器发来的单条消息。"""
-        if not isinstance(payload, dict) or payload.get("type", "message") != "message":
+        if not isinstance(payload, dict):
+            await socket.send_json({"type": "error", "content": "不支持的消息格式。"})
+            return
+
+        payload_type = payload.get("type", "message")
+        if payload_type == "history":
+            await self._send_history(socket, chat_id, payload)
+            return
+        if payload_type != "message":
             await socket.send_json({"type": "error", "content": "不支持的消息格式。"})
             return
 
@@ -171,6 +191,28 @@ class WebChannel(BaseChannel):
             content=content,
             metadata={"source": "web"},
         )
+
+    async def _send_history(self, socket: WebSocket, chat_id: str, payload: dict[str, Any]) -> None:
+        """向浏览器返回当前 Web 会话最近历史。"""
+        limit = self._history_limit(payload.get("limit", 100))
+        messages: list[dict[str, str]] = []
+        if self._history_provider:
+            session_key = f"{self.name}:{chat_id}"
+            result = self._history_provider(session_key, limit)
+            if inspect.isawaitable(result):
+                result = await result
+            if isinstance(result, list):
+                messages = result[-limit:] if limit else []
+        await socket.send_json({"type": "history", "messages": messages})
+
+    @staticmethod
+    def _history_limit(value: Any) -> int:
+        """限制 Web 历史最多返回 100 条。"""
+        try:
+            limit = int(value)
+        except (TypeError, ValueError):
+            limit = 100
+        return max(0, min(limit, 100))
 
     def _register(self, chat_id: str, socket: WebSocket) -> None:
         """登记一个浏览器连接。"""
@@ -189,8 +231,12 @@ class WebChannel(BaseChannel):
             self._connections.pop(chat_id, None)
 
     @staticmethod
-    def _outbound_payload(msg: OutboundMessage) -> dict[str, str]:
+    def _outbound_payload(msg: OutboundMessage) -> dict[str, Any]:
         """把 Agent 回复转成浏览器消息格式。"""
         if msg.metadata.get("_progress"):
             return {"type": "status", "content": msg.content or "processing"}
-        return {"type": "message", "role": "assistant", "content": msg.content}
+        payload: dict[str, Any] = {"type": "message", "role": "assistant", "content": msg.content}
+        approval = msg.metadata.get("approval")
+        if isinstance(approval, dict):
+            payload["approval"] = approval
+        return payload
