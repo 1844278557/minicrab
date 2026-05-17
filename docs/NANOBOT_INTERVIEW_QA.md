@@ -200,6 +200,14 @@ RAG 数据结构分成“文档级元数据”和“分块级向量数据”两�
 
 优先做三件事：第一，增加工具权限分级和高危操作确认；第二，建设固定评估集和链路观测，记录每轮工具、耗时、Token 和失败原因；第三，把 MessageBus 做成可插拔实现，为未来 Redis/Kafka 多实例部署留扩展口。
 
+### Q42：这个项目你是怎么 vibe coding 的？
+
+这个项目可以理解成从 0 开始的 vibe coding，但不是一句话让 AI 生成完整系统。我先把需求拆成几个确定模块：Agent 执行循环、消息总线、工具注册、多渠道适配、长期记忆、RAG、Cron 和 MCP 扩展，然后让 AI 先生成最小可运行骨架，再逐步扩展。
+
+实际开发时，我会先用 AI 快速产出基础代码，比如 `AgentLoop + AgentRunner` 的调用链、`ToolRegistry` 的统一工具接口、`MessageBus + BaseChannel` 的消息格式、RAG 的 `DocumentRecord + DocumentChunk` 数据结构。然后我再人工检查职责是否清楚、状态是否能落盘、异常是否能兜底，并补上测试。
+
+所以我的流程是：AI 负责从 0 到 1 快速生成原型和样板代码，我负责拆模块、定边界、做取舍、补安全和验证。这样可以提高开发速度，但不会把核心架构判断完全交给 AI。
+
 ## 12. 详答补充版
 
 这一部分用于回答面试官追问“能不能讲细一点”。前面的问题适合快速回答，下面内容适合展开说明。
@@ -306,6 +314,24 @@ Heartbeat 处理主动巡检。它定期读取 `HEARTBEAT.md`，然后让 LLM �
 第三层是检索结果结构。向量检索会返回 chunk id、文本、metadata 和 distance；BM25 会从 ChromaDB 取出所有 chunk 文本后懒加载构建关键词索引。最终用 `source_file + chunk_index` 作为唯一键做 RRF 融合，封装成 `RetrievalResult`，包含正文、来源文件、chunk 序号、相关分数和 metadata，再由 `RAGSearchResult` 格式化进模型上下文。
 
 面试总结句：RAG 不是只存一段文本向量，而是文档级注册表负责生命周期管理，chunk 级向量库负责语义检索，metadata 负责来源追踪和过滤，检索结果对象负责把命中的片段稳定地交给模型。
+
+### 这个项目是怎么 vibe coding 的？
+
+如果面试官问这个问题，我会先说明：这个项目可以按从 0 开始 vibe coding 来讲，但我的做法不是“一句话生成整个项目”，而是用 AI 做从 0 到 1 的原型搭建和模块迭代，自己负责架构拆分、边界控制和验收。
+
+具体流程分五步。
+
+第一步是用 AI 做需求拆解和架构草图。我先给出目标：做一个低成本、易部署、能长期运行的个人 AI 助手。然后让 AI 帮我拆出核心模块，包括 Agent 执行循环、消息总线、工具系统、多渠道适配、长期记忆、RAG、Cron、Heartbeat 和 MCP。这个阶段重点不是写大量代码，而是先确定系统边界。
+
+第二步是让 AI 生成最小可运行骨架。比如先生成 `AgentLoop + AgentRunner`，跑通“用户输入 -> 构建上下文 -> 调模型 -> 输出回复”；再生成 `ToolRegistry`，让工具有统一的 `name`、`description`、`schema` 和 `execute`；接着生成 `MessageBus + BaseChannel`，把不同聊天平台都统一成 `InboundMessage` 和 `OutboundMessage`。
+
+第三步是围绕真实场景继续扩展。多渠道部分，让 AI 先生成 Channel 适配器模板，再按微信、Slack、Telegram 这类平台补登录、消息去重、流式合并和失败重试。工具部分，先让 AI 生成文件、Web、Shell、Cron、message、spawn 这些工具骨架，再人工确认权限边界和错误返回。RAG 部分，让 AI 辅助比较 ChromaDB、分块策略、BM25、RRF 和 rerank，最终落成 `DocumentRecord + DocumentChunk + RetrievalResult` 这套结构。
+
+第四步是人工补工程边界。AI 从 0 生成的代码通常能跑主流程，但容易漏掉长期运行问题，比如同一会话并发写乱、模型一直不产出最终回复、工具重复失败、流式消息发太碎、MCP 超时、网页 SSRF、工具结果撑爆上下文。所以我会专门回到 `AgentLoop`、`AgentRunner`、`ChannelManager`、`RAGStore` 这些核心模块里补会话锁、最大迭代次数、重试、超时、截断和工作区限制。
+
+第五步是测试和文档闭环。每个模块不是生成完就结束，而是补测试验证，比如工具注册和参数校验、RAG 索引和检索、记忆压缩、消息收发、Cron 触发、上下文构建。通过后再把关键设计写进文档，比如为什么拆 `AgentLoop` 和 `AgentRunner`、为什么不用 Kafka、RAG 数据结构怎么设计。
+
+结合这个项目，AI 帮助最大的地方是把从 0 到 1 的速度拉起来，尤其是模块骨架、工具 schema、测试样例、异常分支和文档整理。人工负责的是“方向和边界”，比如哪些能力必须轻量化、哪些状态要落盘、哪些工具需要限制权限、哪些场景要做兜底。面试时我会强调：这个项目是 vibe coding 起步，但不是无约束生成，核心工程判断和验收仍然由我负责。
 
 ### Skill 怎么写，经验是什么？
 
