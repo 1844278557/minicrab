@@ -13,6 +13,7 @@ This keeps platform integrations separate from the agent core.
 ## Key Modules
 
 - `nanobot/agent/loop.py`: Runs the agent, builds context, calls the model, executes tools, and writes replies back to the bus.
+- `nanobot/agent/tools/memory.py`: Updates `USER.md` when the user explicitly asks the agent to remember personal facts or preferences.
 - `nanobot/bus/queue.py`: Provides the inbound and outbound queues used by channels and the agent.
 - `nanobot/bus/events.py`: Defines the message objects passed through the bus.
 - `nanobot/channels/base.py`: Defines the common channel interface.
@@ -47,3 +48,8 @@ First-version decisions:
 - The channel defaults to `127.0.0.1` to avoid accidental public exposure.
 - The frontend uses plain HTML, CSS, and JavaScript to avoid a build step.
 
+## Memory Design
+
+- User-requested memories are saved in `USER.md` through the `remember_user_info` tool.
+- Automatic conversation summaries remain in `memory/MEMORY.md`.
+- `ContextBuilder` loads `USER.md` as a bootstrap file, so saved user facts are available in later conversations.

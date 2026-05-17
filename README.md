@@ -242,6 +242,10 @@ nanobot agent
 
 That's it! You have a working AI assistant in 2 minutes.
 
+### User-requested Memory
+
+When the user explicitly asks nanobot to remember personal facts or preferences, the agent can update `USER.md` through the `remember_user_info` tool. Automatic conversation summaries still use `memory/MEMORY.md`.
+
 ## 💬 Chat Apps
 
 Connect nanobot to your favorite chat platform. Want to build your own? See the [Channel Plugin Guide](./docs/CHANNEL_PLUGIN_GUIDE.md).

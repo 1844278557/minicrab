@@ -27,6 +27,7 @@ from nanobot.agent.tools.episode import (
     SearchEpisodesTool,
 )
 from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
+from nanobot.agent.tools.memory import RememberUserInfoTool
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.rag import (
     CleanupExpiredRAGTool,
@@ -162,6 +163,7 @@ class AgentLoop:
         allowed_dir = self.workspace if self.restrict_to_workspace else None
         extra_read = [BUILTIN_SKILLS_DIR] if allowed_dir else None
         self.tools.register(ReadFileTool(workspace=self.workspace, allowed_dir=allowed_dir, extra_allowed_dirs=extra_read))
+        self.tools.register(RememberUserInfoTool(workspace=self.workspace))
         for cls in (WriteFileTool, EditFileTool, ListDirTool):
             self.tools.register(cls(workspace=self.workspace, allowed_dir=allowed_dir))
         if self.exec_config.enable:

@@ -6,11 +6,9 @@ import platform
 from pathlib import Path
 from typing import Any
 
-from nanobot.utils.helpers import current_time_str
-
 from nanobot.agent.memory import MemoryStore
-from nanobot.agent.skills import SkillsLoader, BUILTIN_SKILLS_DIR
-from nanobot.utils.helpers import build_assistant_message, detect_image_mime
+from nanobot.agent.skills import BUILTIN_SKILLS_DIR, SkillsLoader
+from nanobot.utils.helpers import build_assistant_message, current_time_str, detect_image_mime
 
 
 class ContextBuilder:
@@ -87,7 +85,8 @@ You are nanobot, a helpful AI assistant.
 
 ## Workspace
 Your workspace is at: {workspace_path}
-- Long-term memory: {workspace_path}/memory/MEMORY.md (write important facts here)
+- User profile memory: {workspace_path}/USER.md (use `remember_user_info` only when the user explicitly asks you to remember personal facts or preferences)
+- Automatic long-term memory: {workspace_path}/memory/MEMORY.md (managed by conversation consolidation)
 - Episode memory: Use the `search_episodes` tool to search past conversation history when needed
 - Custom skills: {workspace_path}/skills/{{skill-name}}/SKILL.md
 
