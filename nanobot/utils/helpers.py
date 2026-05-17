@@ -114,6 +114,19 @@ def split_message(content: str, max_len: int = 2000) -> list[str]:
     return chunks
 
 
+def is_approval_prompt_text(content: Any) -> bool:
+    """Detect legacy approval prompts that should not enter chat history."""
+    if not isinstance(content, str):
+        return False
+    text = content.strip()
+    return (
+        text.startswith("需要你确认：")
+        and "编号：A-" in text
+        and "\n同意 A-" in text
+        and "\n拒绝 A-" in text
+    )
+
+
 def build_assistant_message(
     content: str | None,
     tool_calls: list[dict[str, Any]] | None = None,

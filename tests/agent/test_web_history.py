@@ -29,6 +29,19 @@ def test_get_session_history_filters_internal_messages(tmp_path) -> None:
         {"role": "tool", "content": "tool result", "timestamp": "4"},
         {"role": "assistant", "content": "你好，有什么需要？", "timestamp": "5"},
         {"role": "assistant", "content": "   ", "timestamp": "6"},
+        {
+            "role": "assistant",
+            "content": (
+                "需要你确认：\n\n"
+                "编号：A-20260517215805-001\n"
+                "操作：写入长期用户记忆\n"
+                "原因：会把信息长期保存到 USER.md。\n\n"
+                "回复：\n"
+                "同意 A-20260517215805-001\n"
+                "拒绝 A-20260517215805-001"
+            ),
+            "timestamp": "7",
+        },
     ]
 
     history = loop.get_session_history("web:default", limit=100)

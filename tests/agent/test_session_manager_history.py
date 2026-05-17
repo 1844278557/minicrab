@@ -149,6 +149,28 @@ def test_no_tool_messages_unchanged():
     _assert_no_orphans(history)
 
 
+def test_get_history_filters_legacy_approval_prompts():
+    session = Session(key="web:default")
+    session.messages.append({"role": "user", "content": "记住我是女的"})
+    session.messages.append({
+        "role": "assistant",
+        "content": (
+            "需要你确认：\n\n"
+            "编号：A-20260517215805-001\n"
+            "操作：写入长期用户记忆\n"
+            "原因：会把信息长期保存到 USER.md。\n\n"
+            "回复：\n"
+            "同意 A-20260517215805-001\n"
+            "拒绝 A-20260517215805-001"
+        ),
+    })
+    session.messages.append({"role": "user", "content": "继续"})
+
+    history = session.get_history(max_messages=100)
+
+    assert [message["content"] for message in history] == ["记住我是女的", "继续"]
+
+
 # --- Edge: all leading messages are orphan tool results ---
 
 def test_all_orphan_prefix_stripped():

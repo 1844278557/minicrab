@@ -48,7 +48,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
 from nanobot.providers.base import LLMProvider, ToolCallRequest
 from nanobot.session.manager import Session, SessionManager
-from nanobot.utils.helpers import build_assistant_message
+from nanobot.utils.helpers import build_assistant_message, is_approval_prompt_text
 
 if TYPE_CHECKING:
     from nanobot.config.schema import (
@@ -889,6 +889,8 @@ class AgentLoop:
             content = self._history_text(message.get("content"))
             if not content:
                 continue
+            if is_approval_prompt_text(content):
+                continue
             visible.append({
                 "role": str(role),
                 "content": content,
@@ -927,6 +929,8 @@ class AgentLoop:
             role, content = entry.get("role"), entry.get("content")
             if role == "assistant" and not content and not entry.get("tool_calls"):
                 continue  # skip empty assistant messages — they poison session context
+            if role == "assistant" and is_approval_prompt_text(content):
+                continue
             if role == "tool":
                 if isinstance(content, str) and len(content) > self._TOOL_RESULT_MAX_CHARS:
                     entry["content"] = content[:self._TOOL_RESULT_MAX_CHARS] + "\n... (truncated)"

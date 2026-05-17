@@ -10,7 +10,7 @@ from typing import Any
 from loguru import logger
 
 from nanobot.config.paths import get_legacy_sessions_dir
-from nanobot.utils.helpers import ensure_dir, safe_filename
+from nanobot.utils.helpers import ensure_dir, is_approval_prompt_text, safe_filename
 
 
 @dataclass
@@ -68,7 +68,11 @@ class Session:
 
     def get_history(self, max_messages: int = 500) -> list[dict[str, Any]]:
         """Return unconsolidated messages for LLM input, aligned to a legal tool-call boundary."""
-        unconsolidated = self.messages[self.last_consolidated:]
+        unconsolidated = [
+            message
+            for message in self.messages[self.last_consolidated:]
+            if not is_approval_prompt_text(message.get("content"))
+        ]
         sliced = unconsolidated[-max_messages:]
 
         # Drop leading non-user messages to avoid starting mid-turn when possible.
