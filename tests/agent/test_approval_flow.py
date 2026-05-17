@@ -55,7 +55,10 @@ async def test_runner_stops_before_approved_tool_executes() -> None:
     ))
 
     assert result.stop_reason == "approval_required"
-    assert "需要你确认" in (result.final_content or "")
+    assert result.final_content is None
+    assert result.approval_event is not None
+    assert result.approval_event["approval_id"] == "A-test"
+    assert result.messages == []
     tools.execute.assert_not_awaited()
 
 
@@ -63,16 +66,19 @@ async def test_runner_stops_before_approved_tool_executes() -> None:
 async def test_loop_approval_executes_remember_user_info_after_confirm(tmp_path) -> None:
     """用户同意后，原工具才会执行。"""
     provider = _make_provider()
-    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
-        content="",
-        tool_calls=[
-            ToolCallRequest(
-                id="call_1",
-                name="remember_user_info",
-                arguments={"content": "# User Profile\n\n- 女朋友生日是 5 月 20 日。"},
-            )
-        ],
-    ))
+    provider.chat_with_retry = AsyncMock(side_effect=[
+        LLMResponse(
+            content="",
+            tool_calls=[
+                ToolCallRequest(
+                    id="call_1",
+                    name="remember_user_info",
+                    arguments={"content": "# User Profile\n\n- 女朋友生日是 5 月 20 日。"},
+                )
+            ],
+        ),
+        LLMResponse(content="已记住。", tool_calls=[]),
+    ])
     loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
     loop.tools.get_definitions = MagicMock(return_value=[])
 
@@ -81,7 +87,8 @@ async def test_loop_approval_executes_remember_user_info_after_confirm(tmp_path)
     )
 
     assert first is not None
-    assert "需要你确认" in first.content
+    assert first.content == ""
+    assert first.metadata["_control"] == "approval_required"
     assert first.metadata["approval"]["id"].startswith("A-")
     assert not (tmp_path / "USER.md").exists()
 
@@ -90,25 +97,31 @@ async def test_loop_approval_executes_remember_user_info_after_confirm(tmp_path)
     )
 
     assert second is not None
-    assert "已执行确认操作" in second.content
-    assert "USER.md updated" in second.content
+    assert second.content == "已记住。"
     assert "女朋友生日是 5 月 20 日" in (tmp_path / "USER.md").read_text(encoding="utf-8")
+    history = loop.get_session_history("web:default", 100)
+    assert [message["role"] for message in history] == ["user", "assistant"]
+    assert all("需要你确认" not in message["content"] for message in history)
+    assert all("同意" not in message["content"] for message in history)
 
 
 @pytest.mark.asyncio
 async def test_loop_approval_reject_does_not_execute_tool(tmp_path) -> None:
     """用户拒绝后，原工具不会执行。"""
     provider = _make_provider()
-    provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
-        content="",
-        tool_calls=[
-            ToolCallRequest(
-                id="call_1",
-                name="remember_user_info",
-                arguments={"content": "# User Profile\n\n- 不应写入。"},
-            )
-        ],
-    ))
+    provider.chat_with_retry = AsyncMock(side_effect=[
+        LLMResponse(
+            content="",
+            tool_calls=[
+                ToolCallRequest(
+                    id="call_1",
+                    name="remember_user_info",
+                    arguments={"content": "# User Profile\n\n- 不应写入。"},
+                )
+            ],
+        ),
+        LLMResponse(content="已取消。", tool_calls=[]),
+    ])
     loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
     loop.tools.get_definitions = MagicMock(return_value=[])
 
@@ -120,5 +133,5 @@ async def test_loop_approval_reject_does_not_execute_tool(tmp_path) -> None:
     )
 
     assert response is not None
-    assert "已取消" in response.content
+    assert response.content == "已取消。"
     assert not (tmp_path / "USER.md").exists()

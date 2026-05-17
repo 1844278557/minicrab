@@ -9,7 +9,7 @@ from typing import Any, Callable
 
 from nanobot.agent.hook import AgentHook, AgentHookContext
 from nanobot.agent.tools.registry import ToolRegistry
-from nanobot.providers.base import LLMProvider, ToolCallRequest
+from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 from nanobot.utils.helpers import build_assistant_message
 
 _DEFAULT_MAX_ITERATIONS_MESSAGE = (
@@ -35,7 +35,7 @@ class AgentRunSpec:
     max_iterations_message: str | None = None
     concurrent_tools: bool = False
     fail_on_tool_error: bool = False
-    approval_callback: Callable[[ToolCallRequest], Any] | None = None
+    approval_callback: Callable[..., Any] | None = None
 
 
 @dataclass(slots=True)
@@ -49,6 +49,7 @@ class AgentRunResult:
     stop_reason: str = "completed"
     error: str | None = None
     tool_events: list[dict[str, str]] = field(default_factory=list)
+    approval_event: dict[str, Any] | None = None
 
 
 class AgentRunner:
@@ -66,6 +67,7 @@ class AgentRunner:
         error: str | None = None
         stop_reason = "completed"
         tool_events: list[dict[str, str]] = []
+        approval_event: dict[str, Any] | None = None
 
         for iteration in range(spec.max_iterations):
             context = AgentHookContext(iteration=iteration, messages=messages)
@@ -109,9 +111,13 @@ class AgentRunner:
 
                 await hook.before_execute_tools(context)
 
-                approval_event = await self._request_approval(spec, response.tool_calls)
+                approval_event = await self._request_approval(
+                    spec,
+                    response.tool_calls,
+                    messages,
+                    response,
+                )
                 if approval_event:
-                    final_content = str(approval_event.get("content") or "需要人工确认。")
                     event = {
                         "name": str(approval_event.get("tool_name") or response.tool_calls[0].name),
                         "status": "approval_required",
@@ -119,12 +125,11 @@ class AgentRunner:
                         "approval_id": str(approval_event.get("approval_id") or ""),
                     }
                     tool_events.append(event)
-                    context.tool_results = [final_content]
+                    context.tool_results = []
                     context.tool_events = [event]
-                    context.final_content = final_content
+                    context.final_content = None
                     context.stop_reason = "approval_required"
                     stop_reason = "approval_required"
-                    messages.append(build_assistant_message(final_content))
                     await hook.after_iteration(context)
                     break
 
@@ -195,23 +200,60 @@ class AgentRunner:
             stop_reason=stop_reason,
             error=error,
             tool_events=tool_events,
+            approval_event=approval_event,
         )
 
     async def _request_approval(
         self,
         spec: AgentRunSpec,
         tool_calls: list[ToolCallRequest],
+        messages: list[dict[str, Any]],
+        response: LLMResponse,
     ) -> dict[str, Any] | None:
         """在工具执行前检查是否需要人工确认。"""
         if spec.approval_callback is None:
             return None
         for tool_call in tool_calls:
-            event = spec.approval_callback(tool_call)
+            event = self._call_approval_callback(
+                spec.approval_callback,
+                tool_call,
+                tool_calls,
+                messages,
+                response,
+            )
             if inspect.isawaitable(event):
                 event = await event
             if event:
                 return event
         return None
+
+    @staticmethod
+    def _call_approval_callback(
+        callback: Callable[..., Any],
+        tool_call: ToolCallRequest,
+        tool_calls: list[ToolCallRequest],
+        messages: list[dict[str, Any]],
+        response: LLMResponse,
+    ) -> Any:
+        """兼容旧的一参回调和新的四参回调。"""
+        try:
+            signature = inspect.signature(callback)
+        except (TypeError, ValueError):
+            return callback(tool_call)
+
+        positional = [
+            parameter
+            for parameter in signature.parameters.values()
+            if parameter.kind
+            in {parameter.POSITIONAL_ONLY, parameter.POSITIONAL_OR_KEYWORD}
+        ]
+        has_varargs = any(
+            parameter.kind == parameter.VAR_POSITIONAL
+            for parameter in signature.parameters.values()
+        )
+        if has_varargs or len(positional) >= 4:
+            return callback(tool_call, tool_calls, messages, response)
+        return callback(tool_call)
 
     async def _execute_tools(
         self,

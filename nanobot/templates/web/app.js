@@ -8,47 +8,84 @@ let socket;
 let pendingStatus;
 let connected = false;
 let historyLoaded = false;
+let approvalModal;
 
-function appendMessage(role, content, approval) {
+function appendMessage(role, content) {
   const node = document.createElement("div");
   node.className = `message ${role}`;
   const text = document.createElement("div");
   text.textContent = content;
   node.appendChild(text);
-  if (approval && approval.id) {
-    node.appendChild(createApprovalActions(approval));
-  }
   messagesEl.appendChild(node);
   messagesEl.scrollTop = messagesEl.scrollHeight;
   return node;
 }
 
-function createApprovalActions(approval) {
+function ensureApprovalModal() {
+  if (approvalModal) {
+    return approvalModal;
+  }
+  const backdrop = document.createElement("div");
+  backdrop.className = "approval-backdrop";
+  backdrop.hidden = true;
+
+  const panel = document.createElement("div");
+  panel.className = "approval-modal";
+
+  const title = document.createElement("h2");
+  title.textContent = "需要确认";
+  const summary = document.createElement("p");
+  summary.className = "approval-summary";
+  const reason = document.createElement("p");
+  reason.className = "approval-reason";
+
   const actions = document.createElement("div");
-  actions.className = "approval-actions";
+  actions.className = "approval-modal-actions";
+  const reject = document.createElement("button");
+  reject.type = "button";
+  reject.className = "secondary";
+  reject.textContent = "拒绝";
   const approve = document.createElement("button");
   approve.type = "button";
   approve.textContent = "同意";
-  approve.addEventListener("click", () => sendApproval("同意", approval.id, actions));
-  const reject = document.createElement("button");
-  reject.type = "button";
-  reject.textContent = "拒绝";
-  reject.className = "secondary";
-  reject.addEventListener("click", () => sendApproval("拒绝", approval.id, actions));
-  actions.append(approve, reject);
-  return actions;
+  actions.append(reject, approve);
+  panel.append(title, summary, reason, actions);
+  backdrop.appendChild(panel);
+  document.body.appendChild(backdrop);
+
+  approvalModal = { backdrop, summary, reason, approve, reject };
+  return approvalModal;
 }
 
-function sendApproval(action, id, actions) {
+function showApprovalModal(approval) {
+  if (!approval || !approval.id) {
+    return;
+  }
+  const modal = ensureApprovalModal();
+  modal.summary.textContent = approval.summary || "执行需要人工确认的操作";
+  modal.reason.textContent = approval.reason || "";
+  modal.approve.disabled = false;
+  modal.reject.disabled = false;
+  modal.approve.onclick = () => sendApproval("approved", approval.id);
+  modal.reject.onclick = () => sendApproval("rejected", approval.id);
+  modal.backdrop.hidden = false;
+}
+
+function closeApprovalModal() {
+  if (approvalModal) {
+    approvalModal.backdrop.hidden = true;
+  }
+}
+
+function sendApproval(decision, id) {
   if (!socket || socket.readyState !== WebSocket.OPEN) {
     return;
   }
-  actions.querySelectorAll("button").forEach((button) => {
-    button.disabled = true;
-  });
-  const content = `${action} ${id}`;
-  appendMessage("user", content);
-  socket.send(JSON.stringify({ type: "message", content }));
+  const modal = ensureApprovalModal();
+  modal.approve.disabled = true;
+  modal.reject.disabled = true;
+  closeApprovalModal();
+  socket.send(JSON.stringify({ type: "approval_response", decision, id }));
   setPending("处理中");
 }
 
@@ -117,9 +154,14 @@ function connect() {
       renderHistory(Array.isArray(data.messages) ? data.messages : []);
       return;
     }
+    if (data.type === "approval_required") {
+      clearPending();
+      showApprovalModal(data.approval);
+      return;
+    }
     clearPending();
     if (data.type === "message") {
-      appendMessage(data.role || "assistant", data.content || "", data.approval);
+      appendMessage(data.role || "assistant", data.content || "");
     } else if (data.type === "error") {
       appendMessage("error", data.content || "处理失败，请稍后重试。");
     }

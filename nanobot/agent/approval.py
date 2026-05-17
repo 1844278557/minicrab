@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -27,6 +27,7 @@ class ApprovalRequest:
     channel: str
     chat_id: str
     tool_name: str
+    tool_call_id: str
     arguments: dict[str, Any]
     summary: str
     reason: str
@@ -34,6 +35,12 @@ class ApprovalRequest:
     status: str
     created_at: datetime
     expires_at: datetime
+    resume_messages: list[dict[str, Any]] = field(default_factory=list)
+    tool_calls: list[Any] = field(default_factory=list)
+    response_content: str | None = None
+    reasoning_content: str | None = None
+    thinking_blocks: list[dict[str, Any]] | None = None
+    resume_save_skip: int = 0
 
     def expired(self) -> bool:
         """判断审批是否已经过期。"""
@@ -223,6 +230,13 @@ class ApprovalManager:
         chat_id: str,
         tool_name: str,
         arguments: dict[str, Any],
+        tool_call_id: str = "",
+        resume_messages: list[dict[str, Any]] | None = None,
+        tool_calls: list[Any] | None = None,
+        response_content: str | None = None,
+        reasoning_content: str | None = None,
+        thinking_blocks: list[dict[str, Any]] | None = None,
+        resume_save_skip: int = 0,
     ) -> dict[str, Any] | None:
         """如果工具调用需要审核，创建待确认请求。"""
         decision = self.policy.evaluate(
@@ -241,6 +255,7 @@ class ApprovalManager:
             channel=channel,
             chat_id=chat_id,
             tool_name=tool_name,
+            tool_call_id=tool_call_id,
             arguments=arguments,
             summary=decision.summary,
             reason=decision.reason,
@@ -248,6 +263,12 @@ class ApprovalManager:
             status="pending",
             created_at=now,
             expires_at=now + self.ttl,
+            resume_messages=[dict(message) for message in (resume_messages or [])],
+            tool_calls=list(tool_calls or []),
+            response_content=response_content,
+            reasoning_content=reasoning_content,
+            thinking_blocks=thinking_blocks,
+            resume_save_skip=resume_save_skip,
         )
         self._requests[request.id] = request
         return {
@@ -291,6 +312,18 @@ class ApprovalManager:
             return None
         request = self._requests.get(match.group(1))
         if not request or request.session_key != session_key or request.expired():
+            return None
+        return {
+            "id": request.id,
+            "toolName": request.tool_name,
+            "summary": request.summary,
+            "reason": request.reason,
+        }
+
+    def metadata_for_request(self, approval_id: str) -> dict[str, str] | None:
+        """返回 Web 弹窗需要的审批元数据。"""
+        request = self._requests.get(approval_id)
+        if not request or request.expired():
             return None
         return {
             "id": request.id,

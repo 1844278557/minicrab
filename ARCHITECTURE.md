@@ -49,14 +49,16 @@ First-version decisions:
 - The channel defaults to `127.0.0.1` to avoid accidental public exposure.
 - The frontend uses plain HTML, CSS, and JavaScript to avoid a build step.
 - The browser requests the latest server-side session history over WebSocket and displays the most recent 100 visible messages.
-- Risky actions can be approved from Web with buttons; other channels use the same text confirmation flow.
+- Risky actions are sent to Web as control events and rendered as modal approvals; other channels use the same text confirmation flow.
 
 ## Approval Design
 
 - Approval is checked before tool execution inside the shared agent runner.
 - First-version approval is in memory only; pending approvals are lost if the gateway restarts.
 - `remember_user_info`, risky shell commands, sensitive file writes, cron changes, RAG deletion/cleanup, media sends, and cross-chat sends require confirmation.
-- Web renders approval metadata as buttons, while other channels receive a normal text prompt.
+- Approval prompts are not saved as normal assistant messages, so they do not appear in Web history.
+- After the user approves or rejects, the saved pending tool call is resumed and the model continues to produce a normal final reply.
+- Web renders approval metadata as a modal dialog, while other channels receive a normal text prompt.
 
 ## Memory Design
 

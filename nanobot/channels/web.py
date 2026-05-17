@@ -175,6 +175,9 @@ class WebChannel(BaseChannel):
         if payload_type == "history":
             await self._send_history(socket, chat_id, payload)
             return
+        if payload_type == "approval_response":
+            await self._handle_approval_response(payload, socket, chat_id, sender_id)
+            return
         if payload_type != "message":
             await socket.send_json({"type": "error", "content": "不支持的消息格式。"})
             return
@@ -190,6 +193,29 @@ class WebChannel(BaseChannel):
             chat_id=chat_id,
             content=content,
             metadata={"source": "web"},
+        )
+
+    async def _handle_approval_response(
+        self,
+        payload: dict[str, Any],
+        socket: WebSocket,
+        chat_id: str,
+        sender_id: str,
+    ) -> None:
+        """处理浏览器弹窗里的同意或拒绝。"""
+        approval_id = str(payload.get("id") or "").strip()
+        decision = str(payload.get("decision") or "").strip()
+        if not approval_id or decision not in {"approved", "rejected"}:
+            await socket.send_json({"type": "error", "content": "审批回复无效。"})
+            return
+
+        action = "同意" if decision == "approved" else "拒绝"
+        await socket.send_json({"type": "status", "content": "processing"})
+        await self._handle_message(
+            sender_id=sender_id,
+            chat_id=chat_id,
+            content=f"{action} {approval_id}",
+            metadata={"source": "web", "_approval_response": True},
         )
 
     async def _send_history(self, socket: WebSocket, chat_id: str, payload: dict[str, Any]) -> None:
@@ -235,6 +261,12 @@ class WebChannel(BaseChannel):
         """把 Agent 回复转成浏览器消息格式。"""
         if msg.metadata.get("_progress"):
             return {"type": "status", "content": msg.content or "processing"}
+        if msg.metadata.get("_control") == "approval_required":
+            payload: dict[str, Any] = {"type": "approval_required"}
+            approval = msg.metadata.get("approval")
+            if isinstance(approval, dict):
+                payload["approval"] = approval
+            return payload
         payload: dict[str, Any] = {"type": "message", "role": "assistant", "content": msg.content}
         approval = msg.metadata.get("approval")
         if isinstance(approval, dict):

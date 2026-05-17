@@ -298,7 +298,7 @@ nanobot gateway
 http://127.0.0.1:18790/web
 ```
 
-The first version supports one default browser conversation, server-side recent history loading, and approval buttons for risky actions.
+The first version supports one default browser conversation, server-side recent history loading, and modal approvals for risky actions. Approval prompts are not saved as chat history; after approve or reject, the agent continues the same task and returns a normal final reply.
 
 </details>
 

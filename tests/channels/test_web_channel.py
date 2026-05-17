@@ -94,6 +94,31 @@ def test_websocket_message_publishes_inbound_message() -> None:
     assert inbound.session_key == "web:default"
 
 
+def test_websocket_approval_response_publishes_text_confirmation() -> None:
+    """浏览器审批弹窗会转成渠道文本确认。"""
+    bus = MessageBus()
+    channel = WebChannel({"enabled": True, "allowFrom": ["*"]}, bus)
+    client = TestClient(channel.app)
+
+    with client.websocket_connect("/web/ws") as socket:
+        assert socket.receive_json() == {"type": "status", "content": "connected"}
+        socket.send_json({"type": "approval_response", "decision": "approved", "id": "A-test"})
+        assert socket.receive_json() == {"type": "status", "content": "processing"}
+
+        inbound = None
+        for _ in range(20):
+            try:
+                inbound = bus.inbound.get_nowait()
+                break
+            except Exception:
+                time.sleep(0.01)
+
+    assert inbound is not None
+    assert inbound.channel == "web"
+    assert inbound.content == "同意 A-test"
+    assert inbound.metadata["_approval_response"] is True
+
+
 def test_websocket_history_without_provider_returns_empty_list() -> None:
     """没有历史读取回调时，Web 历史请求返回空列表。"""
     channel = WebChannel({"enabled": True, "allowFrom": ["*"]}, MessageBus())
@@ -164,7 +189,7 @@ async def test_send_pushes_outbound_message_to_browser_socket() -> None:
 
 @pytest.mark.asyncio
 async def test_send_pushes_approval_metadata_to_browser_socket() -> None:
-    """审批消息会把按钮所需元数据发给浏览器。"""
+    """审批控制事件会把弹窗所需元数据发给浏览器。"""
     channel = WebChannel({"enabled": True, "allowFrom": ["*"]}, MessageBus())
     socket = _FakeSocket()
     channel._register("default", socket)  # type: ignore[arg-type]
@@ -172,8 +197,9 @@ async def test_send_pushes_approval_metadata_to_browser_socket() -> None:
     await channel.send(OutboundMessage(
         channel="web",
         chat_id="default",
-        content="需要你确认",
+        content="",
         metadata={
+            "_control": "approval_required",
             "approval": {
                 "id": "A-test",
                 "summary": "写入长期用户记忆",
@@ -183,9 +209,7 @@ async def test_send_pushes_approval_metadata_to_browser_socket() -> None:
     ))
 
     assert socket.sent == [{
-        "type": "message",
-        "role": "assistant",
-        "content": "需要你确认",
+        "type": "approval_required",
         "approval": {
             "id": "A-test",
             "summary": "写入长期用户记忆",

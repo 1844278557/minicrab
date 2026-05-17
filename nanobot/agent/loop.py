@@ -7,6 +7,7 @@ import json
 import os
 import time
 from contextlib import AsyncExitStack, nullcontext
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
@@ -45,8 +46,9 @@ from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
-from nanobot.providers.base import LLMProvider
+from nanobot.providers.base import LLMProvider, ToolCallRequest
 from nanobot.session.manager import Session, SessionManager
+from nanobot.utils.helpers import build_assistant_message
 
 if TYPE_CHECKING:
     from nanobot.config.schema import (
@@ -56,6 +58,23 @@ if TYPE_CHECKING:
         WebSearchConfig,
     )
     from nanobot.cron.service import CronService
+
+
+@dataclass(slots=True)
+class AgentLoopRunResult:
+    """AgentLoop 内部执行结果，兼容旧的三元组解包。"""
+
+    final_content: str | None
+    tools_used: list[str]
+    messages: list[dict[str, Any]]
+    approval_event: dict[str, Any] | None = None
+    stop_reason: str = "completed"
+
+    def __iter__(self):
+        """保持原有 final_content, tools_used, messages 解包方式可用。"""
+        yield self.final_content
+        yield self.tools_used
+        yield self.messages
 
 
 class AgentLoop:
@@ -290,7 +309,7 @@ class AgentLoop:
         chat_id: str = "direct",
         message_id: str | None = None,
         session_key: str | None = None,
-    ) -> tuple[str | None, list[str], list[dict]]:
+    ) -> AgentLoopRunResult:
         """Run the agent iteration loop.
 
         *on_stream*: called with each content delta during streaming.
@@ -338,6 +357,28 @@ class AgentLoop:
             def finalize_content(self, context: AgentHookContext, content: str | None) -> str | None:
                 return loop_self._strip_think(content)
 
+        def _request_approval(
+            tool_call: ToolCallRequest,
+            tool_calls: list[ToolCallRequest],
+            messages: list[dict[str, Any]],
+            response: Any,
+        ) -> dict[str, Any] | None:
+            arguments = tool_call.arguments if isinstance(tool_call.arguments, dict) else {}
+            return self.approvals.request(
+                session_key=session_key or f"{channel}:{chat_id}",
+                channel=channel,
+                chat_id=chat_id,
+                tool_name=tool_call.name,
+                tool_call_id=tool_call.id,
+                arguments=arguments,
+                resume_messages=messages,
+                tool_calls=tool_calls,
+                response_content=response.content,
+                reasoning_content=response.reasoning_content,
+                thinking_blocks=response.thinking_blocks,
+                resume_save_skip=len(messages),
+            )
+
         result = await self.runner.run(AgentRunSpec(
             initial_messages=initial_messages,
             tools=self.tools,
@@ -346,20 +387,20 @@ class AgentLoop:
             hook=_LoopHook(),
             error_message="Sorry, I encountered an error calling the AI model.",
             concurrent_tools=True,
-            approval_callback=lambda tool_call: self.approvals.request(
-                session_key=session_key or f"{channel}:{chat_id}",
-                channel=channel,
-                chat_id=chat_id,
-                tool_name=tool_call.name,
-                arguments=tool_call.arguments if isinstance(tool_call.arguments, dict) else {},
-            ),
+            approval_callback=_request_approval,
         ))
         self._last_usage = result.usage
         if result.stop_reason == "max_iterations":
             logger.warning("Max iterations ({}) reached", self.max_iterations)
         elif result.stop_reason == "error":
             logger.error("LLM returned error: {}", (result.final_content or "")[:200])
-        return result.final_content, result.tools_used, result.messages
+        return AgentLoopRunResult(
+            final_content=result.final_content,
+            tools_used=result.tools_used,
+            messages=result.messages,
+            approval_event=result.approval_event,
+            stop_reason=result.stop_reason,
+        )
 
     async def run(self) -> None:
         """Run the agent loop, dispatching messages as tasks to stay responsive to /stop."""
@@ -505,14 +546,23 @@ class AgentLoop:
                 current_message=msg.content, channel=channel, chat_id=chat_id,
                 current_role=current_role,
             )
-            final_content, _, all_msgs = await self._run_agent_loop(
+            run_result = await self._run_agent_loop(
                 messages, channel=channel, chat_id=chat_id,
                 message_id=msg.metadata.get("message_id"),
                 session_key=key,
             )
+            final_content, _, all_msgs = run_result
             self._save_turn(session, all_msgs, 1 + len(history))
             self.sessions.save(session)
             self._schedule_background(self.memory_consolidator.maybe_consolidate_by_tokens(session))
+            if run_result.stop_reason == "approval_required" and run_result.approval_event:
+                return self._approval_outbound(
+                    channel=channel,
+                    chat_id=chat_id,
+                    event=run_result.approval_event,
+                    base_metadata=msg.metadata,
+                    web_control=channel == "web",
+                )
             return OutboundMessage(channel=channel, chat_id=chat_id,
                                   content=final_content or "Background task completed.")
 
@@ -561,7 +611,7 @@ class AgentLoop:
                 channel=msg.channel, chat_id=msg.chat_id, content=content, metadata=meta,
             ))
 
-        final_content, _, all_msgs = await self._run_agent_loop(
+        run_result = await self._run_agent_loop(
             initial_messages,
             on_progress=on_progress or _bus_progress,
             on_stream=on_stream,
@@ -570,6 +620,18 @@ class AgentLoop:
             message_id=msg.metadata.get("message_id"),
             session_key=key,
         )
+        final_content, _, all_msgs = run_result
+
+        if run_result.stop_reason == "approval_required" and run_result.approval_event:
+            self._save_turn(session, all_msgs, 1 + len(history))
+            self.sessions.save(session)
+            return self._approval_outbound(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                event=run_result.approval_event,
+                base_metadata=msg.metadata,
+                web_control=msg.channel == "web",
+            )
 
         if final_content is None:
             final_content = "I've completed processing but have no response to give."
@@ -585,9 +647,6 @@ class AgentLoop:
         logger.info("Response to {}:{}: {}", msg.channel, msg.sender_id, preview)
 
         meta = dict(msg.metadata or {})
-        approval_meta = self.approvals.metadata_from_content(key, final_content)
-        if approval_meta:
-            meta["approval"] = approval_meta
         if on_stream is not None:
             meta["_streamed"] = True
         return OutboundMessage(
@@ -604,7 +663,7 @@ class AgentLoop:
         resolution = self.approvals.consume_response(session_key, msg.content)
         if resolution is None:
             return None
-        if resolution.status != "approved" or resolution.request is None:
+        if resolution.request is None:
             return OutboundMessage(
                 channel=msg.channel,
                 chat_id=msg.chat_id,
@@ -612,7 +671,63 @@ class AgentLoop:
                 metadata=dict(msg.metadata or {}),
             )
 
-        request = resolution.request
+        if not resolution.request.resume_messages or not resolution.request.tool_calls:
+            if resolution.status != "approved":
+                return OutboundMessage(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    content=resolution.message,
+                    metadata=dict(msg.metadata or {}),
+                )
+            result = await self.tools.execute(
+                resolution.request.tool_name,
+                resolution.request.arguments,
+            )
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=f"已执行确认操作：{resolution.request.summary}\n\n结果：{result}",
+                metadata=dict(msg.metadata or {}),
+            )
+
+        return await self._continue_after_approval(msg, session_key, resolution)
+
+    def _approval_outbound(
+        self,
+        *,
+        channel: str,
+        chat_id: str,
+        event: dict[str, Any],
+        base_metadata: dict[str, Any] | None,
+        web_control: bool,
+    ) -> OutboundMessage:
+        """生成审批等待消息，Web 用控制事件，其他渠道用文字。"""
+        meta = dict(base_metadata or {})
+        approval_id = str(event.get("approval_id") or "")
+        approval_meta = self.approvals.metadata_for_request(approval_id)
+        if approval_meta:
+            meta["approval"] = approval_meta
+        if web_control:
+            meta["_control"] = "approval_required"
+        content = "" if web_control else str(event.get("content") or "需要你确认。")
+        return OutboundMessage(channel=channel, chat_id=chat_id, content=content, metadata=meta)
+
+    async def _continue_after_approval(
+        self,
+        msg: InboundMessage,
+        session_key: str,
+        resolution: Any,
+    ) -> OutboundMessage | None:
+        """把审批结果接回原来的工具调用流程。"""
+        if resolution.request is None:
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content="当前没有匹配的待确认操作。",
+                metadata=dict(msg.metadata or {}),
+            )
+
+        approval = resolution.request
         self._set_tool_context(
             msg.channel,
             msg.chat_id,
@@ -620,13 +735,94 @@ class AgentLoop:
             sender_id=msg.sender_id,
             session_key=session_key,
         )
-        result = await self.tools.execute(request.tool_name, request.arguments)
+
+        if message_tool := self.tools.get("message"):
+            if isinstance(message_tool, MessageTool):
+                message_tool.start_turn()
+
+        messages = [dict(message) for message in approval.resume_messages]
+        messages.append(build_assistant_message(
+            approval.response_content or "",
+            tool_calls=[tool_call.to_openai_tool_call() for tool_call in approval.tool_calls],
+            reasoning_content=approval.reasoning_content,
+            thinking_blocks=approval.thinking_blocks,
+        ))
+        for tool_call in approval.tool_calls:
+            result = await self._approval_tool_result(
+                tool_call,
+                approved=resolution.status == "approved",
+                approved_request=approval,
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+            )
+            messages.append({
+                "role": "tool",
+                "tool_call_id": tool_call.id,
+                "name": tool_call.name,
+                "content": result,
+            })
+
+        run_result = await self._run_agent_loop(
+            messages,
+            channel=msg.channel,
+            chat_id=msg.chat_id,
+            message_id=msg.metadata.get("message_id"),
+            session_key=session_key,
+        )
+        final_content, _, all_msgs = run_result
+        session = self.sessions.get_or_create(session_key)
+        self._save_turn(session, all_msgs, approval.resume_save_skip)
+        self.sessions.save(session)
+        self._schedule_background(self.memory_consolidator.maybe_consolidate_by_tokens(session))
+
+        if run_result.stop_reason == "approval_required" and run_result.approval_event:
+            return self._approval_outbound(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                event=run_result.approval_event,
+                base_metadata=msg.metadata,
+                web_control=msg.channel == "web",
+            )
+
+        if (mt := self.tools.get("message")) and isinstance(mt, MessageTool) and mt._sent_in_turn:
+            return None
+
         return OutboundMessage(
             channel=msg.channel,
             chat_id=msg.chat_id,
-            content=f"已执行确认操作：{request.summary}\n\n结果：{result}",
+            content=final_content or "操作已处理。",
             metadata=dict(msg.metadata or {}),
         )
+
+    async def _approval_tool_result(
+        self,
+        tool_call: ToolCallRequest,
+        *,
+        approved: bool,
+        approved_request: Any,
+        channel: str,
+        chat_id: str,
+    ) -> Any:
+        """根据审批结果生成对应的工具结果。"""
+        if not approved:
+            return f"用户已拒绝执行：{approved_request.summary}。不要执行该动作，请直接回复用户。"
+
+        arguments = tool_call.arguments if isinstance(tool_call.arguments, dict) else {}
+        if tool_call.id != approved_request.tool_call_id:
+            decision = self.approvals.policy.evaluate(
+                tool_call.name,
+                arguments,
+                channel=channel,
+                chat_id=chat_id,
+            )
+            if decision is not None:
+                return "该工具调用也需要单独人工确认，当前没有执行。"
+        try:
+            return await self.tools.execute(tool_call.name, arguments)
+        except asyncio.CancelledError:
+            raise
+        except BaseException as exc:
+            return f"Error: {type(exc).__name__}: {exc}"
 
     @staticmethod
     def _image_placeholder(block: dict[str, Any]) -> dict[str, str]:
