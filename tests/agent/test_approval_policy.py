@@ -37,6 +37,7 @@ def test_workspace_write_policy(tmp_path) -> None:
     policy = ApprovalPolicy(tmp_path)
 
     assert policy.evaluate("write_file", {"path": "notes.md", "content": "ok"}) is None
+    assert policy.evaluate("edit_file", {"path": "USER.md", "old_text": "a", "new_text": "b"}) is not None
     assert policy.evaluate("edit_file", {"path": ".env", "old_text": "a", "new_text": "b"}) is not None
     assert policy.evaluate("write_file", {"path": str(tmp_path.parent / "outside.txt"), "content": "x"}) is not None
 

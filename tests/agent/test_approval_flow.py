@@ -135,3 +135,55 @@ async def test_loop_approval_reject_does_not_execute_tool(tmp_path) -> None:
     assert response is not None
     assert response.content == "已取消。"
     assert not (tmp_path / "USER.md").exists()
+
+
+@pytest.mark.asyncio
+async def test_loop_reject_does_not_allow_alternate_user_memory_write(tmp_path) -> None:
+    """用户拒绝记忆写入后，模型不能换用 edit_file 写 USER.md。"""
+    provider = _make_provider()
+    second_call_tools: list = []
+
+    async def chat_with_retry(*, tools, **_kwargs):
+        if not second_call_tools:
+            second_call_tools.append(None)
+            return LLMResponse(
+                content="",
+                tool_calls=[
+                    ToolCallRequest(
+                        id="call_1",
+                        name="remember_user_info",
+                        arguments={"content": "# User Profile\n\n- 使用 Python。"},
+                    )
+                ],
+            )
+        second_call_tools[0] = tools
+        return LLMResponse(
+            content="",
+            tool_calls=[
+                ToolCallRequest(
+                    id="call_2",
+                    name="edit_file",
+                    arguments={
+                        "path": str(tmp_path / "USER.md"),
+                        "old_text": "- **Tools You Use**: (IDEs, languages, frameworks)",
+                        "new_text": "- **Tools You Use**: Python, (IDEs, languages, frameworks)",
+                    },
+                )
+            ],
+        )
+
+    provider.chat_with_retry = AsyncMock(side_effect=chat_with_retry)
+    loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
+    loop.tools.get_definitions = MagicMock(return_value=[{"type": "function", "function": {"name": "edit_file"}}])
+
+    await loop._process_message(
+        InboundMessage(channel="web", sender_id="user", chat_id="default", content="记住我使用 Python")
+    )
+    response = await loop._process_message(
+        InboundMessage(channel="web", sender_id="user", chat_id="default", content="拒绝")
+    )
+
+    assert response is not None
+    assert response.content == "操作已取消，未执行。"
+    assert second_call_tools[0] == []
+    assert not (tmp_path / "USER.md").exists()

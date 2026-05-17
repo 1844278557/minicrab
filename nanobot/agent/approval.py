@@ -148,6 +148,11 @@ class ApprovalPolicy:
                 summary=f"修改工作区外文件：{resolved}",
                 reason="目标路径不在当前工作区内。",
             )
+        if self._is_user_memory_path(resolved):
+            return ApprovalDecision(
+                summary="修改长期用户记忆文件",
+                reason="会直接修改 USER.md，影响长期用户记忆。",
+            )
         if self._is_sensitive_path(resolved):
             return ApprovalDecision(
                 summary=f"修改敏感文件：{resolved.name}",
@@ -188,6 +193,10 @@ class ApprovalPolicy:
     def _is_under_workspace(self, path: Path) -> bool:
         """判断路径是否在工作区内。"""
         return path == self.workspace or self.workspace in path.parents
+
+    def _is_user_memory_path(self, path: Path) -> bool:
+        """判断路径是否是根目录 USER.md。"""
+        return path.name.lower() == "user.md" and path.parent == self.workspace
 
     def _is_sensitive_path(self, path: Path) -> bool:
         """判断路径是否看起来像敏感配置或密钥文件。"""

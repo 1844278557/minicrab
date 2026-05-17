@@ -36,6 +36,7 @@ class AgentRunSpec:
     concurrent_tools: bool = False
     fail_on_tool_error: bool = False
     approval_callback: Callable[..., Any] | None = None
+    tools_enabled: bool = True
 
 
 @dataclass(slots=True)
@@ -74,7 +75,7 @@ class AgentRunner:
             await hook.before_iteration(context)
             kwargs: dict[str, Any] = {
                 "messages": messages,
-                "tools": spec.tools.get_definitions(),
+                "tools": spec.tools.get_definitions() if spec.tools_enabled else [],
                 "model": spec.model,
             }
             if spec.temperature is not None:
@@ -105,6 +106,21 @@ class AgentRunner:
             context.tool_calls = list(response.tool_calls)
 
             if response.has_tool_calls:
+                if not spec.tools_enabled:
+                    if hook.wants_streaming():
+                        await hook.on_stream_end(context, resuming=False)
+                    clean = hook.finalize_content(context, response.content)
+                    final_content = clean or "操作已取消，未执行。"
+                    messages.append(build_assistant_message(
+                        final_content,
+                        reasoning_content=response.reasoning_content,
+                        thinking_blocks=response.thinking_blocks,
+                    ))
+                    context.final_content = final_content
+                    context.stop_reason = stop_reason
+                    await hook.after_iteration(context)
+                    break
+
                 if hook.wants_streaming():
                     await hook.on_stream_end(context, resuming=True)
                 tools_used.extend(tc.name for tc in response.tool_calls)

@@ -309,6 +309,7 @@ class AgentLoop:
         chat_id: str = "direct",
         message_id: str | None = None,
         session_key: str | None = None,
+        tools_enabled: bool = True,
     ) -> AgentLoopRunResult:
         """Run the agent iteration loop.
 
@@ -388,6 +389,7 @@ class AgentLoop:
             error_message="Sorry, I encountered an error calling the AI model.",
             concurrent_tools=True,
             approval_callback=_request_approval,
+            tools_enabled=tools_enabled,
         ))
         self._last_usage = result.usage
         if result.stop_reason == "max_iterations":
@@ -768,6 +770,7 @@ class AgentLoop:
             chat_id=msg.chat_id,
             message_id=msg.metadata.get("message_id"),
             session_key=session_key,
+            tools_enabled=resolution.status == "approved",
         )
         final_content, _, all_msgs = run_result
         session = self.sessions.get_or_create(session_key)

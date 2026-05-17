@@ -55,9 +55,10 @@ First-version decisions:
 
 - Approval is checked before tool execution inside the shared agent runner.
 - First-version approval is in memory only; pending approvals are lost if the gateway restarts.
-- `remember_user_info`, risky shell commands, sensitive file writes, cron changes, RAG deletion/cleanup, media sends, and cross-chat sends require confirmation.
+- `remember_user_info`, direct writes to root `USER.md`, risky shell commands, sensitive file writes, cron changes, RAG deletion/cleanup, media sends, and cross-chat sends require confirmation.
 - Approval prompts are not saved as normal assistant messages, so they do not appear in Web history.
-- After the user approves or rejects, the saved pending tool call is resumed and the model continues to produce a normal final reply.
+- After the user approves, the saved pending tool call is resumed and the model continues to produce a normal final reply.
+- After the user rejects, the model continues without tool access, so it cannot use another tool to perform the rejected action.
 - Web renders approval metadata as a modal dialog, while other channels receive a normal text prompt.
 
 ## Memory Design
