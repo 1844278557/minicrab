@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -98,15 +99,16 @@ class RAGStore:
         embedding_base_url: str | None = None,
     ):
         self.rag_dir = ensure_dir(memory_dir / "rag")
-        self.registry_file = self.rag_dir / "document_registry.json"
-        self._registry: dict[str, DocumentRecord] = {}
-        self._load_registry()
         self._collection = None
         self._client = None
         self.ttl_days = ttl_days
         self.embedding_model = embedding_model
         self.embedding_api_key = embedding_api_key
         self.embedding_base_url = embedding_base_url or "https://api.siliconflow.cn/v1"
+        self.collection_name = self._collection_name_for_model(embedding_model)
+        self.registry_file = self._registry_file_for_collection(self.collection_name)
+        self._registry: dict[str, DocumentRecord] = {}
+        self._load_registry()
 
     def _load_registry(self) -> None:
         """加载文档注册表"""
@@ -150,9 +152,9 @@ class RAGStore:
 
             embedding_fn = self._create_embedding_function()
             self._collection = self._client.get_or_create_collection(
-                name=self.COLLECTION_NAME,
+                name=self.collection_name,
                 embedding_function=embedding_fn,
-                metadata={"hnsw:space": "cosine"},
+                metadata={"hnsw:space": "cosine", "embedding_model": self.embedding_model},
             )
             logger.info(f"RAG vector store ready: {chroma_dir} (model={self.embedding_model})")
             return self._collection
@@ -179,8 +181,8 @@ class RAGStore:
             return self._create_siliconflow_embedding_function()
 
         try:
-            from sentence_transformers import SentenceTransformer
             import numpy as np
+            from sentence_transformers import SentenceTransformer
 
             st_model = SentenceTransformer(model, cache_folder=None)
 
@@ -202,6 +204,23 @@ class RAGStore:
         except Exception as e:
             logger.warning(f"Failed to load embedding model '{model}': {e}, using default")
             return chromadb.utils.embedding_functions.DefaultEmbeddingFunction()
+
+    @classmethod
+    def _collection_name_for_model(cls, embedding_model: str) -> str:
+        """根据 embedding 模型选择隔离的 collection 名称。"""
+        if embedding_model == "all-MiniLM-L6-v2":
+            return cls.COLLECTION_NAME
+
+        clean = re.sub(r"[^a-zA-Z0-9_-]+", "_", embedding_model.lower()).strip("_")
+        clean = clean[:24] or "custom"
+        digest = hashlib.sha1(embedding_model.encode("utf-8")).hexdigest()[:8]
+        return f"{cls.COLLECTION_NAME}_{clean}_{digest}"[:63]
+
+    def _registry_file_for_collection(self, collection_name: str) -> Path:
+        """返回当前 collection 对应的文档注册表路径。"""
+        if collection_name == self.COLLECTION_NAME:
+            return self.rag_dir / "document_registry.json"
+        return self.rag_dir / f"{collection_name}_registry.json"
 
     def _create_siliconflow_embedding_function(self) -> Any:
         """创建SiliconFlow API嵌入函数"""
@@ -515,6 +534,7 @@ class RAGStore:
             "vector_count": vector_count,
             "ttl_days": self.ttl_days,
             "embedding_model": self.embedding_model,
+            "collection_name": self.collection_name,
             "documents": [
                 {
                     "file_name": r.file_name,

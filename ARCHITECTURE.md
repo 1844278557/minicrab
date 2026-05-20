@@ -66,3 +66,9 @@ First-version decisions:
 - User-requested memories are saved in `USER.md` through the `remember_user_info` tool.
 - Automatic conversation summaries remain in `memory/MEMORY.md`.
 - `ContextBuilder` loads `USER.md` as a bootstrap file, so saved user facts are available in later conversations.
+
+## RAG Design
+
+- RAG documents are stored in ChromaDB collections under `memory/rag/chroma`.
+- The default embedding model keeps the legacy `rag_documents` collection.
+- Non-default embedding models use model-specific collection and registry names, so switching from the default embedding to SiliconFlow/Qwen does not conflict with the old Chroma collection configuration.
