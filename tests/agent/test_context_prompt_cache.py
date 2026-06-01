@@ -59,6 +59,21 @@ def test_system_prompt_contains_reminder_rules(tmp_path) -> None:
     assert "Do not show tool syntax such as `cron.add(...)`" in prompt
 
 
+def test_system_prompt_contains_memory_routing_rules(tmp_path) -> None:
+    """系统提示应明确不同记忆内容的存放位置。"""
+    workspace = _make_workspace(tmp_path)
+    builder = ContextBuilder(workspace)
+
+    prompt = builder.build_system_prompt()
+
+    assert "## Memory Routing Guidelines" in prompt
+    assert "USER.md is for stable user profile facts and preferences only" in prompt
+    assert "CONTEXT.md is for the current local project state only" in prompt
+    assert "MEMORY.md is automatic long-term conversation memory" in prompt
+    assert "RAG is for uploaded documents and reference files" in prompt
+    assert "Do not store temporary chat, tool output, project implementation notes, or document contents in USER.md" in prompt
+
+
 def test_runtime_context_is_separate_untrusted_user_message(tmp_path) -> None:
     """Runtime metadata should be merged with the user message."""
     workspace = _make_workspace(tmp_path)

@@ -28,7 +28,8 @@ class RememberUserInfoTool(Tool):
             "Update USER.md when the user explicitly asks you to remember personal "
             "facts, preferences, or profile information for future conversations. "
             "Read the current USER.md first if it exists, then pass the full updated "
-            "markdown content. Do not use this for automatic conversation summaries."
+            "markdown content. Do not use this for automatic conversation summaries, "
+            "project status, implementation notes, tool output, or document contents."
         )
 
     @property

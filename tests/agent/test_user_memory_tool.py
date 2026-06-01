@@ -78,3 +78,16 @@ def test_agent_loop_registers_remember_user_info_tool(tmp_path) -> None:
     assert loop.tools.has("remember_user_info")
     schema = loop.tools.get("remember_user_info").to_schema()
     assert schema["function"]["parameters"]["required"] == ["content"]
+
+
+def test_remember_user_info_schema_excludes_non_profile_memory(tmp_path) -> None:
+    """工具说明应避免把项目状态、工具输出或文档内容写入 USER.md。"""
+    tool = RememberUserInfoTool(workspace=tmp_path)
+
+    description = tool.description
+
+    assert "personal facts, preferences, or profile information" in description
+    assert "Do not use this for automatic conversation summaries" in description
+    assert "project status" in description
+    assert "tool output" in description
+    assert "document contents" in description
