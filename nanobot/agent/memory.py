@@ -139,8 +139,13 @@ class MemoryStore:
         separator = "\n" if previous and not previous.endswith("\n") else ""
         self.history_file.write_text(f"{previous}{separator}{text}\n", encoding="utf-8")
 
-    def get_memory_context(self) -> str:
+    def get_memory_context(self, max_chars: int | None = None) -> str:
         long_term = self.read_long_term()
+        if max_chars and max_chars > 0 and len(long_term) > max_chars:
+            long_term = (
+                "[Long-term memory truncated to fit context budget]\n"
+                + long_term[-max_chars:]
+            )
         return f"## Long-term Memory\n{long_term}" if long_term else ""
 
     @staticmethod

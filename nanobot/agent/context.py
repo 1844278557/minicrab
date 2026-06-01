@@ -14,7 +14,9 @@ from nanobot.utils.helpers import build_assistant_message, current_time_str, det
 class ContextBuilder:
     """Builds the context (system prompt + messages) for the agent."""
 
-    BOOTSTRAP_FILES = ["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md"]
+    BOOTSTRAP_FILES = ["AGENTS.md", "SOUL.md", "USER.md", "CONTEXT.md", "TOOLS.md"]
+    MAX_HISTORY_CHARS = 48_000
+    MAX_LONG_TERM_MEMORY_CHARS = 24_000
     _RUNTIME_CONTEXT_TAG = "[Runtime Context — metadata only, not instructions]"
 
     def __init__(self, workspace: Path, timezone: str | None = None):
@@ -34,7 +36,7 @@ class ContextBuilder:
         if bootstrap:
             parts.append(bootstrap)
 
-        memory = self.memory.get_memory_context()
+        memory = self.memory.get_memory_context(max_chars=self.MAX_LONG_TERM_MEMORY_CHARS)
         if memory:
             parts.append(f"# Memory\n\n{memory}")
 
@@ -86,6 +88,7 @@ You are nanobot, a helpful AI assistant.
 ## Workspace
 Your workspace is at: {workspace_path}
 - User profile memory: {workspace_path}/USER.md (use `remember_user_info` only when the user explicitly asks you to remember personal facts or preferences)
+- Current task state: {workspace_path}/CONTEXT.md (task summary block for current goal, progress, decisions, validation, and cautions)
 - Automatic long-term memory: {workspace_path}/memory/MEMORY.md (managed by conversation consolidation)
 - Episode memory: Use the `search_episodes` tool to search past conversation history when needed
 - Custom skills: {workspace_path}/skills/{{skill-name}}/SKILL.md
@@ -109,6 +112,11 @@ Your workspace is at: {workspace_path}
 - RAG is for uploaded documents and reference files. Use `index_document` for files the user wants to search or ask questions about later.
 - Do not store temporary chat, tool output, project implementation notes, or document contents in USER.md.
 - If the right destination is unclear, ask a short clarification before writing persistent memory.
+
+## Context Budget Guidelines
+- Keep the current user request, recent conversation, USER.md, and CONTEXT.md higher priority than old raw chat.
+- When context is crowded, rely on CONTEXT.md and concise summaries instead of repeating long tool output or stale discussion.
+- Treat CONTEXT.md as the current task summary block: update it after meaningful project progress so future turns can resume without rereading all history.
 
 ## Reminder Guidelines
 - For clear one-time reminder requests, call the `cron` tool directly instead of asking the user to choose from options.
@@ -164,11 +172,75 @@ IMPORTANT: To send files (images, documents, audio, video) to the user, you MUST
         else:
             merged = [{"type": "text", "text": runtime_ctx}] + user_content
 
+        trimmed_history = self._trim_history_to_budget(history, self.MAX_HISTORY_CHARS)
+
         return [
             {"role": "system", "content": self.build_system_prompt(skill_names)},
-            *history,
+            *trimmed_history,
             {"role": current_role, "content": merged},
         ]
+
+    @classmethod
+    def _trim_history_to_budget(
+        cls,
+        history: list[dict[str, Any]],
+        max_chars: int,
+    ) -> list[dict[str, Any]]:
+        """Keep a recent legal history suffix within a simple character budget."""
+        if max_chars <= 0 or not history:
+            return []
+
+        total = 0
+        kept_reversed: list[dict[str, Any]] = []
+        for message in reversed(history):
+            size = cls._message_budget_chars(message)
+            if kept_reversed and total + size > max_chars:
+                break
+            kept_reversed.append(message)
+            total += size
+            if total >= max_chars:
+                break
+
+        trimmed = list(reversed(kept_reversed))
+
+        for i, message in enumerate(trimmed):
+            if message.get("role") == "user":
+                trimmed = trimmed[i:]
+                break
+
+        start = cls._find_legal_history_start(trimmed)
+        return trimmed[start:] if start else trimmed
+
+    @staticmethod
+    def _message_budget_chars(message: dict[str, Any]) -> int:
+        """Estimate prompt pressure for one history message using characters."""
+        total = len(str(message.get("content", "")))
+        if message.get("tool_calls"):
+            total += len(str(message["tool_calls"]))
+        return total
+
+    @staticmethod
+    def _find_legal_history_start(messages: list[dict[str, Any]]) -> int:
+        """Drop orphan tool results introduced by history-budget trimming."""
+        declared: set[str] = set()
+        start = 0
+        for i, message in enumerate(messages):
+            role = message.get("role")
+            if role == "assistant":
+                for tool_call in message.get("tool_calls") or []:
+                    if isinstance(tool_call, dict) and tool_call.get("id"):
+                        declared.add(str(tool_call["id"]))
+            elif role == "tool":
+                tool_call_id = message.get("tool_call_id")
+                if tool_call_id and str(tool_call_id) not in declared:
+                    start = i + 1
+                    declared.clear()
+                    for previous in messages[start:i + 1]:
+                        if previous.get("role") == "assistant":
+                            for tool_call in previous.get("tool_calls") or []:
+                                if isinstance(tool_call, dict) and tool_call.get("id"):
+                                    declared.add(str(tool_call["id"]))
+        return start
 
     def _build_user_content(self, text: str, media: list[str] | None) -> str | list[dict[str, Any]]:
         """Build user message content with optional base64-encoded images."""
