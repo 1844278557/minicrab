@@ -46,6 +46,9 @@ class TestMessageToolSuppressLogic:
 
         assert len(sent) == 1
         assert result is None  # suppressed
+        loop.provider.chat_with_retry.assert_awaited_once()
+        history = loop.get_session_history("feishu:chat123", 100)
+        assert not any("Done" in message["content"] for message in history)
 
     @pytest.mark.asyncio
     async def test_not_suppress_when_no_message_tool_used(self, tmp_path: Path) -> None:

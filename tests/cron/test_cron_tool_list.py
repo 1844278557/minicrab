@@ -277,11 +277,51 @@ def test_add_at_job_uses_default_timezone_for_naive_datetime(tmp_path) -> None:
     tool = _make_tool_with_tz(tmp_path, "Asia/Shanghai")
     tool.set_context("telegram", "chat-1")
 
-    result = tool._add_job("Morning reminder", None, None, None, "2026-03-25T08:00:00")
+    result = tool._add_job("Morning reminder", None, None, None, "2099-03-25T08:00:00")
 
     assert result.startswith("Created job")
     job = tool._cron.list_jobs()[0]
-    expected = int(datetime(2026, 3, 25, 0, 0, 0, tzinfo=timezone.utc).timestamp() * 1000)
+    expected = int(datetime(2099, 3, 25, 0, 0, 0, tzinfo=timezone.utc).timestamp() * 1000)
+    assert job.schedule.at_ms == expected
+
+
+def test_add_at_job_rejects_past_datetime(tmp_path) -> None:
+    tool = _make_tool_with_tz(tmp_path, "Asia/Shanghai")
+    tool.set_context("telegram", "chat-1")
+
+    result = tool._add_job("Old reminder", None, None, None, "2000-01-01T08:00:00")
+
+    assert "already in the past" in result
+    assert tool._cron.list_jobs() == []
+
+
+def test_add_at_job_rejects_tz_parameter_with_clear_guidance(tmp_path) -> None:
+    tool = _make_tool_with_tz(tmp_path, "Asia/Shanghai")
+    tool.set_context("telegram", "chat-1")
+
+    result = tool._add_job(
+        "Brush teeth",
+        None,
+        None,
+        "Asia/Shanghai",
+        "2099-03-25T22:48:00",
+    )
+
+    assert "do not pass tz with one-time at reminders" in result
+    assert "YYYY-MM-DDTHH:MM:SS+08:00" in result
+    assert "Do not convert the user's local time to UTC" in result
+    assert tool._cron.list_jobs() == []
+
+
+def test_add_at_job_accepts_future_datetime_with_explicit_offset(tmp_path) -> None:
+    tool = _make_tool_with_tz(tmp_path, "Asia/Shanghai")
+    tool.set_context("telegram", "chat-1")
+
+    result = tool._add_job("UTC reminder", None, None, None, "2099-03-25T00:00:00+00:00")
+
+    assert result.startswith("Created job")
+    job = tool._cron.list_jobs()[0]
+    expected = int(datetime(2099, 3, 25, 0, 0, 0, tzinfo=timezone.utc).timestamp() * 1000)
     assert job.schedule.at_ms == expected
 
 

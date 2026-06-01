@@ -127,6 +127,22 @@ def is_approval_prompt_text(content: Any) -> bool:
     )
 
 
+def contains_tool_call_markup(content: Any) -> bool:
+    """检测模型误写到正文里的伪工具调用标记。"""
+    if not isinstance(content, str):
+        return False
+    text = content.lower()
+    return any(
+        marker in text
+        for marker in (
+            "<｜dsml｜function_calls",
+            "<｜dsml｜invoke",
+            "<|tool_call",
+            "<tool_call",
+        )
+    )
+
+
 def build_assistant_message(
     content: str | None,
     tool_calls: list[dict[str, Any]] | None = None,

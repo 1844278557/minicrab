@@ -61,7 +61,9 @@ class CronTool(Tool):
     def description(self) -> str:
         return (
             "Schedule reminders and recurring tasks. Actions: add, list, remove. "
-            f"If tz is omitted, cron expressions and naive ISO times default to {self._default_timezone}."
+            f"If tz is omitted, cron expressions and naive ISO times default to {self._default_timezone}. "
+            "For user-local one-time reminders, pass the local datetime in that timezone. "
+            "Do not convert local times to UTC unless the at value includes an explicit offset like +00:00."
         )
 
     @property
@@ -94,7 +96,8 @@ class CronTool(Tool):
                     "type": "string",
                     "description": (
                         "ISO datetime for one-time execution "
-                        f"(e.g. '2026-02-12T10:30:00'). Naive values default to {self._default_timezone}."
+                        f"(e.g. '2026-02-12T10:30:00'). Naive values default to {self._default_timezone}. "
+                        "Use the user's local time directly unless you include an explicit timezone offset."
                     ),
                 },
                 "job_id": {"type": "string", "description": "Job ID (for remove)"},
@@ -135,8 +138,16 @@ class CronTool(Tool):
             return "Error: message is required for add"
         if not self._channel or not self._chat_id:
             return "Error: no session context (channel/chat_id)"
+        if tz and at:
+            return (
+                "Error: do not pass tz with one-time at reminders. "
+                "For one-time reminders, pass the user's local wall-clock datetime directly "
+                f"in {self._default_timezone}, such as YYYY-MM-DDTHH:MM:SS, or include an "
+                "explicit offset in at such as YYYY-MM-DDTHH:MM:SS+08:00. "
+                "Do not convert the user's local time to UTC unless the at value includes +00:00."
+            )
         if tz and not cron_expr:
-            return "Error: tz can only be used with cron_expr"
+            return "Error: tz can only be used with cron_expr, not this action"
         if tz:
             if err := self._validate_timezone(tz):
                 return err
@@ -162,6 +173,16 @@ class CronTool(Tool):
                     return err
                 dt = dt.replace(tzinfo=ZoneInfo(self._default_timezone))
             at_ms = int(dt.timestamp() * 1000)
+            now_ms = self._now_ms()
+            if at_ms <= now_ms:
+                now = self._format_timestamp(now_ms, self._default_timezone)
+                return (
+                    "Error: one-time reminder time is already in the past. "
+                    f"Current time is {now}. Please pass a future local datetime in "
+                    f"{self._default_timezone}, or include an explicit timezone offset. "
+                    "Do not present tool syntax or multiple time options to the user; "
+                    "if the user's requested local time is clear, retry once with that future local wall-clock time."
+                )
             schedule = CronSchedule(kind="at", at_ms=at_ms)
             delete_after = True
         else:
@@ -177,6 +198,11 @@ class CronTool(Tool):
             delete_after_run=delete_after,
         )
         return f"Created job '{job.name}' (id: {job.id})"
+
+    @staticmethod
+    def _now_ms() -> int:
+        """返回当前时间戳，便于测试中过去时间校验。"""
+        return int(datetime.now().timestamp() * 1000)
 
     def _format_timing(self, schedule: CronSchedule) -> str:
         """Format schedule as a human-readable timing string."""

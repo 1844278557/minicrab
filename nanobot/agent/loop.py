@@ -390,6 +390,11 @@ class AgentLoop:
             concurrent_tools=True,
             approval_callback=_request_approval,
             tools_enabled=tools_enabled,
+            stop_after_tools_callback=lambda: (
+                (mt := self.tools.get("message")) is not None
+                and isinstance(mt, MessageTool)
+                and mt._sent_in_turn
+            ),
         ))
         self._last_usage = result.usage
         if result.stop_reason == "max_iterations":
@@ -573,7 +578,8 @@ class AgentLoop:
 
         key = session_key or msg.session_key
 
-        if approval_response := await self._handle_approval_response(msg, key):
+        approval_handled, approval_response = await self._handle_approval_response(msg, key)
+        if approval_handled:
             return approval_response
 
         session = self.sessions.get_or_create(key)
@@ -660,13 +666,13 @@ class AgentLoop:
         self,
         msg: InboundMessage,
         session_key: str,
-    ) -> OutboundMessage | None:
+    ) -> tuple[bool, OutboundMessage | None]:
         """处理用户对待审核操作的同意或拒绝。"""
         resolution = self.approvals.consume_response(session_key, msg.content)
         if resolution is None:
-            return None
+            return False, None
         if resolution.request is None:
-            return OutboundMessage(
+            return True, OutboundMessage(
                 channel=msg.channel,
                 chat_id=msg.chat_id,
                 content=resolution.message,
@@ -675,7 +681,7 @@ class AgentLoop:
 
         if not resolution.request.resume_messages or not resolution.request.tool_calls:
             if resolution.status != "approved":
-                return OutboundMessage(
+                return True, OutboundMessage(
                     channel=msg.channel,
                     chat_id=msg.chat_id,
                     content=resolution.message,
@@ -685,14 +691,14 @@ class AgentLoop:
                 resolution.request.tool_name,
                 resolution.request.arguments,
             )
-            return OutboundMessage(
+            return True, OutboundMessage(
                 channel=msg.channel,
                 chat_id=msg.chat_id,
                 content=f"已执行确认操作：{resolution.request.summary}\n\n结果：{result}",
                 metadata=dict(msg.metadata or {}),
             )
 
-        return await self._continue_after_approval(msg, session_key, resolution)
+        return True, await self._continue_after_approval(msg, session_key, resolution)
 
     def _approval_outbound(
         self,

@@ -43,11 +43,18 @@ def test_workspace_write_policy(tmp_path) -> None:
 
 
 def test_cron_and_rag_delete_actions_require_approval(tmp_path) -> None:
-    """定时任务变更和清空删除类 RAG 工具需要审核。"""
+    """重复定时任务和清空删除类 RAG 工具需要审核。"""
     policy = ApprovalPolicy(tmp_path)
 
     assert policy.evaluate("cron", {"action": "list"}) is None
-    assert policy.evaluate("cron", {"action": "add", "message": "提醒我"}) is not None
+    assert policy.evaluate(
+        "cron",
+        {"action": "add", "message": "提醒我", "at": "2026-05-20T19:46:00"},
+    ) is None
+    assert policy.evaluate(
+        "cron",
+        {"action": "add", "message": "提醒我", "every_seconds": 300},
+    ) is not None
     assert policy.evaluate("cron", {"action": "remove", "job_id": "1"}) is not None
     assert policy.evaluate("clear_rag_store", {"confirm": "yes"}) is not None
     assert policy.evaluate("remove_rag_document", {"file_path": "a.md"}) is not None

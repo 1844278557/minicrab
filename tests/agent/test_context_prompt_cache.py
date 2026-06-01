@@ -47,6 +47,18 @@ def test_system_prompt_stays_stable_when_clock_changes(tmp_path, monkeypatch) ->
     assert prompt1 == prompt2
 
 
+def test_system_prompt_contains_reminder_rules(tmp_path) -> None:
+    """系统提示应约束提醒任务直接调用工具且不展示工具语法。"""
+    workspace = _make_workspace(tmp_path)
+    builder = ContextBuilder(workspace, timezone="Asia/Shanghai")
+
+    prompt = builder.build_system_prompt()
+
+    assert "## Reminder Guidelines" in prompt
+    assert "Do not pass `tz` together with one-time `at`" in prompt
+    assert "Do not show tool syntax such as `cron.add(...)`" in prompt
+
+
 def test_runtime_context_is_separate_untrusted_user_message(tmp_path) -> None:
     """Runtime metadata should be merged with the user message."""
     workspace = _make_workspace(tmp_path)

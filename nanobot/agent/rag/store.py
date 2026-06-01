@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -89,6 +90,10 @@ class RAGStore:
     """
 
     COLLECTION_NAME = "rag_documents"
+    VECTOR_STORE_REPAIR_HINT = (
+        "本地 Chroma 向量库无法打开，可能是旧版本数据格式不兼容或本地数据库损坏。"
+        "不要重试 force_reindex；需要先备份并重建 memory/rag/chroma 后再重新索引文档。"
+    )
 
     def __init__(
         self,
@@ -143,12 +148,7 @@ class RAGStore:
             return self._collection
 
         try:
-            import chromadb
-
-            chroma_dir = self.rag_dir / "chroma"
-            chroma_dir.mkdir(parents=True, exist_ok=True)
-
-            self._client = chromadb.PersistentClient(path=str(chroma_dir))
+            self._client = self._create_chroma_client()
 
             embedding_fn = self._create_embedding_function()
             self._collection = self._client.get_or_create_collection(
@@ -156,7 +156,7 @@ class RAGStore:
                 embedding_function=embedding_fn,
                 metadata={"hnsw:space": "cosine", "embedding_model": self.embedding_model},
             )
-            logger.info(f"RAG vector store ready: {chroma_dir} (model={self.embedding_model})")
+            logger.info(f"RAG vector store ready: {self.rag_dir / 'chroma'} (model={self.embedding_model})")
             return self._collection
 
         except ImportError:
@@ -166,7 +166,23 @@ class RAGStore:
             raise
         except Exception as e:
             logger.error(f"Failed to initialize RAG vector store: {e}")
-            raise
+            raise self._vector_store_error(e) from e
+
+    def _create_chroma_client(self) -> Any:
+        """创建 Chroma 客户端，并关闭匿名遥测噪声。"""
+        os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
+        import chromadb
+
+        chroma_dir = self.rag_dir / "chroma"
+        chroma_dir.mkdir(parents=True, exist_ok=True)
+        return chromadb.PersistentClient(path=str(chroma_dir))
+
+    @classmethod
+    def _vector_store_error(cls, error: BaseException) -> RuntimeError:
+        """把底层 Chroma 异常转换成模型能理解的错误。"""
+        if isinstance(error, KeyError) and error.args and error.args[0] == "_type":
+            return RuntimeError(cls.VECTOR_STORE_REPAIR_HINT)
+        return RuntimeError(f"RAG vector store unavailable: {error}")
 
     def _create_embedding_function(self) -> Any:
         """创建嵌入函数，支持自定义模型和远程API"""
@@ -221,6 +237,51 @@ class RAGStore:
         if collection_name == self.COLLECTION_NAME:
             return self.rag_dir / "document_registry.json"
         return self.rag_dir / f"{collection_name}_registry.json"
+
+    def _all_registry_files(self) -> list[Path]:
+        """返回所有 RAG 注册表文件。"""
+        files: list[Path] = []
+        legacy = self.rag_dir / "document_registry.json"
+        if legacy.exists():
+            files.append(legacy)
+        for path in self.rag_dir.glob(f"{self.COLLECTION_NAME}*_registry.json"):
+            if path not in files:
+                files.append(path)
+        if self.registry_file not in files:
+            files.append(self.registry_file)
+        return files
+
+    def _read_registry_totals(self) -> tuple[int, int]:
+        """统计所有注册表里的文档数和分块数。"""
+        total_docs = 0
+        total_chunks = 0
+        for path in self._all_registry_files():
+            if not path.exists():
+                continue
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                logger.warning(f"Failed to read RAG registry while clearing: {path}")
+                continue
+            documents = data.get("documents", {})
+            if not isinstance(documents, dict):
+                continue
+            total_docs += len(documents)
+            for record in documents.values():
+                if isinstance(record, dict):
+                    total_chunks += int(record.get("chunk_count", 0) or 0)
+        return total_docs, total_chunks
+
+    def _clear_all_registries(self) -> None:
+        """清空所有 RAG 注册表文件。"""
+        empty = json.dumps(
+            {"documents": {}, "total_documents": 0, "total_chunks": 0},
+            ensure_ascii=False,
+            indent=2,
+        )
+        for path in self._all_registry_files():
+            path.write_text(empty, encoding="utf-8")
+        self._registry.clear()
 
     def _create_siliconflow_embedding_function(self) -> Any:
         """创建SiliconFlow API嵌入函数"""
@@ -521,10 +582,14 @@ class RAGStore:
         active_count = total_docs - expired_count
         total_chunks = sum(r.chunk_count for r in self._registry.values())
 
+        vector_store_error = None
+        vector_store_status = "ready"
         try:
             vector_count = self.count()
-        except Exception:
+        except Exception as exc:
             vector_count = -1
+            vector_store_status = "unavailable"
+            vector_store_error = str(exc)
 
         return {
             "total_documents": total_docs,
@@ -532,6 +597,9 @@ class RAGStore:
             "expired_documents": expired_count,
             "total_chunks": total_chunks,
             "vector_count": vector_count,
+            "vector_store_status": vector_store_status,
+            "vector_store_error": vector_store_error,
+            "repair_required": vector_store_status != "ready",
             "ttl_days": self.ttl_days,
             "embedding_model": self.embedding_model,
             "collection_name": self.collection_name,
@@ -549,19 +617,36 @@ class RAGStore:
         }
 
     def clear_all(self) -> dict[str, Any]:
-        """清空所有RAG数据（文档注册表 + 向量存储）"""
+        """清空所有RAG数据（所有 RAG collection + 注册表）"""
+        doc_count, total_chunks = self._read_registry_totals()
+        collections_removed = 0
+        vectors_removed = 0
         try:
-            collection = self._ensure_collection()
-            all_data = collection.get()
-            if all_data and all_data.get("ids"):
-                collection.delete(ids=all_data["ids"])
+            self._client = self._create_chroma_client()
+            for collection in self._client.list_collections():
+                name = collection if isinstance(collection, str) else collection.name
+                if not name.startswith(self.COLLECTION_NAME):
+                    continue
+                try:
+                    current = self._client.get_collection(name=name)
+                    vectors_removed += int(current.count() or 0)
+                except Exception as e:
+                    logger.warning(f"Failed to count RAG collection before clearing {name}: {e}")
+                self._client.delete_collection(name=name)
+                collections_removed += 1
         except Exception as e:
             logger.warning(f"Failed to clear vector store: {e}")
 
-        doc_count = len(self._registry)
-        total_chunks = sum(r.chunk_count for r in self._registry.values())
-        self._registry.clear()
-        self._save_registry()
+        self._clear_all_registries()
+        self._collection = None
 
-        logger.info(f"RAG store cleared: {doc_count} documents, {total_chunks} chunks removed")
-        return {"documents_removed": doc_count, "chunks_removed": total_chunks}
+        logger.info(
+            f"RAG store cleared: {doc_count} documents, {total_chunks} chunks removed, "
+            f"{collections_removed} collections removed"
+        )
+        return {
+            "documents_removed": doc_count,
+            "chunks_removed": total_chunks,
+            "vectors_removed": vectors_removed,
+            "collections_removed": collections_removed,
+        }

@@ -163,10 +163,17 @@ class ApprovalPolicy:
     def _evaluate_cron(self, arguments: dict[str, Any]) -> ApprovalDecision | None:
         """判断定时任务变更是否需要确认。"""
         action = str(arguments.get("action") or "").lower()
-        if action in {"add", "remove"}:
+        if action == "add" and arguments.get("at") and not arguments.get("every_seconds") and not arguments.get("cron_expr"):
+            return None
+        if action == "add":
             return ApprovalDecision(
-                summary=f"变更定时任务：{action}",
-                reason="定时任务会在未来自动执行或被删除。",
+                summary="设置定时任务",
+                reason="会创建重复或长期定时任务。",
+            )
+        if action == "remove":
+            return ApprovalDecision(
+                summary="删除定时任务",
+                reason="会删除已有定时任务。",
             )
         return None
 
@@ -334,24 +341,101 @@ class ApprovalManager:
         request = self._requests.get(approval_id)
         if not request or request.expired():
             return None
+        title, details = self._describe_request(request)
         return {
             "id": request.id,
             "toolName": request.tool_name,
             "summary": request.summary,
             "reason": request.reason,
+            "title": title,
+            "detail": "\n".join(details),
         }
 
     def format_prompt(self, request: ApprovalRequest) -> str:
         """生成发给用户的确认文本。"""
-        return (
-            "需要你确认：\n\n"
-            f"编号：{request.id}\n"
-            f"操作：{request.summary}\n"
-            f"原因：{request.reason}\n\n"
-            "回复：\n"
-            f"同意 {request.id}\n"
-            f"拒绝 {request.id}"
-        )
+        pending = self._pending_for_session(request.session_key)
+        if len(pending) > 1:
+            return self._format_multiple_prompt(pending)
+        return self._format_single_prompt(request)
+
+    def _format_single_prompt(self, request: ApprovalRequest) -> str:
+        """生成单个待确认事项的自然语言提示。"""
+        title, details = self._describe_request(request)
+        lines = [f"要我{title}吗？"]
+        if details:
+            lines.append("")
+            lines.extend(details)
+        lines.extend(["", "回复“确认”继续，回复“取消”放弃。"])
+        return "\n".join(lines)
+
+    def _format_multiple_prompt(self, requests: list[ApprovalRequest]) -> str:
+        """生成多个待确认事项的自然语言提示。"""
+        lines = [f"你有 {len(requests)} 个待确认事项：", ""]
+        for index, request in enumerate(requests, start=1):
+            title, _ = self._describe_request(request)
+            lines.append(f"{index}. {title}")
+        lines.extend(["", "回复“确认 1”继续，回复“取消 1”放弃。"])
+        return "\n".join(lines)
+
+    def _describe_request(self, request: ApprovalRequest) -> tuple[str, list[str]]:
+        """把内部工具调用转换成用户能理解的动作说明。"""
+        args = request.arguments
+        if request.tool_name == "remember_user_info":
+            return "更新长期记忆", ["说明：会写入 USER.md，影响以后对话中的长期记忆。"]
+        if request.tool_name == "clear_rag_store":
+            return "清空知识库", ["说明：会删除所有已索引文档和向量数据。"]
+        if request.tool_name == "remove_rag_document":
+            file_path = str(args.get("file_path") or "")
+            details = ["说明：会从知识库中移除指定文档。"]
+            if file_path:
+                details.insert(0, f"文档：{self._short(file_path, 80)}")
+            return "删除知识库文档", details
+        if request.tool_name == "cleanup_expired_rag":
+            return "清理过期知识库文档", ["说明：会删除过期文档的索引数据。"]
+        if request.tool_name == "cron":
+            return self._describe_cron_request(args)
+        if request.tool_name == "exec":
+            command = str(args.get("command") or "")
+            details = [f"命令：{self._short(command, 120)}"] if command else []
+            if request.reason:
+                details.append(f"说明：{request.reason}")
+            return "执行这条命令", details
+        if request.tool_name in {"write_file", "edit_file"}:
+            path = str(args.get("path") or "")
+            details = [f"文件：{self._short(path, 100)}"] if path else []
+            if request.reason:
+                details.append(f"说明：{request.reason}")
+            return "修改这个文件", details
+        if request.tool_name == "message":
+            content = str(args.get("content") or "")
+            details = [f"内容：{self._short(content, 120)}"] if content else []
+            if request.reason:
+                details.append(f"说明：{request.reason}")
+            return "发送这条消息", details
+        details = [f"说明：{request.reason}"] if request.reason else []
+        return request.summary, details
+
+    def _describe_cron_request(self, args: dict[str, Any]) -> tuple[str, list[str]]:
+        """生成定时任务的用户说明。"""
+        action = str(args.get("action") or "").lower()
+        if action == "remove":
+            job_id = str(args.get("job_id") or "")
+            details = [f"任务：{job_id}"] if job_id else []
+            details.append("说明：会删除已有定时任务。")
+            return "删除定时任务", details
+
+        message = str(args.get("message") or "")
+        details = []
+        if message:
+            details.append(f"内容：{self._short(message, 120)}")
+        if args.get("every_seconds"):
+            details.append(f"频率：每 {args['every_seconds']} 秒")
+        elif args.get("cron_expr"):
+            timing = str(args.get("cron_expr") or "")
+            tz = str(args.get("tz") or "")
+            details.append(f"时间规则：{timing}{f'（{tz}）' if tz else ''}")
+        details.append("说明：会在未来重复或长期执行。")
+        return "设置定时任务", details
 
     def _find_request(
         self,
@@ -360,16 +444,18 @@ class ApprovalManager:
     ) -> ApprovalRequest | str | None:
         """找到当前会话中对应的待确认请求。"""
         if approval_id:
+            pending = self._pending_for_session(session_key)
+            if approval_id.isdigit():
+                index = int(approval_id) - 1
+                if 0 <= index < len(pending):
+                    return pending[index]
+                return None
             request = self._requests.get(approval_id)
             if request and request.session_key == session_key:
                 return request
             return None
 
-        pending = [
-            request
-            for request in self._requests.values()
-            if request.session_key == session_key and request.status == "pending"
-        ]
+        pending = self._pending_for_session(session_key)
         if len(pending) == 1:
             return pending[0]
         if len(pending) > 1:
@@ -381,6 +467,10 @@ class ApprovalManager:
         parts = text.strip().split()
         if not parts:
             return None
+        if len(parts) == 1:
+            match = re.match(r"^(同意|确认|拒绝|取消)(\d+)$", parts[0])
+            if match:
+                parts = [match.group(1), match.group(2)]
         word = parts[0].lower()
         approval_id = parts[1] if len(parts) > 1 else None
         if word in self._APPROVE_WORDS:
@@ -388,6 +478,17 @@ class ApprovalManager:
         if word in self._REJECT_WORDS:
             return "reject", approval_id
         return None
+
+    def _pending_for_session(self, session_key: str) -> list[ApprovalRequest]:
+        """返回当前会话未过期的待确认事项。"""
+        pending: list[ApprovalRequest] = []
+        for request_id, request in list(self._requests.items()):
+            if request.expired():
+                self._requests.pop(request_id, None)
+                continue
+            if request.session_key == session_key and request.status == "pending":
+                pending.append(request)
+        return sorted(pending, key=lambda item: item.created_at)
 
     def _next_id(self, now: datetime) -> str:
         """生成用户可读的审批编号。"""

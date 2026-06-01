@@ -154,6 +154,12 @@ cd nanobot
 pip install -e .
 ```
 
+For an existing development environment that cannot index PDF files, refresh the PDF parser dependency:
+
+```bash
+pip install "markitdown[pdf]>=0.1.0"
+```
+
 **Install with [uv](https://github.com/astral-sh/uv)** (stable, fast)
 
 ```bash

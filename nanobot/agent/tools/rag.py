@@ -14,6 +14,23 @@ from nanobot.agent.rag.retriever import RAGRetriever
 from nanobot.agent.rag.store import RAGStore
 
 
+def _rag_error_payload(error: BaseException) -> str:
+    """返回明确的 RAG 错误，避免模型误判为空库或反复重试。"""
+    message = str(error)
+    payload: dict[str, Any] = {"error": message}
+    if "Chroma" in message or "向量库无法打开" in message or "vector store" in message:
+        payload.update({
+            "code": "rag_vector_store_unavailable",
+            "retryable": False,
+            "force_reindex_will_help": False,
+            "user_message": (
+                "当前无法读取 RAG 向量库，可能是本地 Chroma 数据格式不兼容或损坏。"
+                "请先备份并重建 memory/rag/chroma，再重新索引文档。"
+            ),
+        })
+    return json.dumps(payload, ensure_ascii=False, indent=2)
+
+
 class IndexDocumentTool(Tool):
     """索引文档到RAG知识库"""
 
@@ -73,7 +90,7 @@ class IndexDocumentTool(Tool):
             return json.dumps(result, ensure_ascii=False, indent=2)
         except Exception as e:
             logger.error(f"Index document failed: {e}")
-            return json.dumps({"error": str(e)}, ensure_ascii=False)
+            return _rag_error_payload(e)
 
 
 class SearchRAGTool(Tool):
@@ -153,7 +170,7 @@ class SearchRAGTool(Tool):
 
         except Exception as e:
             logger.error(f"Search RAG failed: {e}")
-            return json.dumps({"error": str(e)}, ensure_ascii=False)
+            return _rag_error_payload(e)
 
 
 class RemoveRAGDocumentTool(Tool):
@@ -190,7 +207,7 @@ class RemoveRAGDocumentTool(Tool):
             return json.dumps(result, ensure_ascii=False, indent=2)
         except Exception as e:
             logger.error(f"Remove RAG document failed: {e}")
-            return json.dumps({"error": str(e)}, ensure_ascii=False)
+            return _rag_error_payload(e)
 
 
 class ListRAGDocumentsTool(Tool):
@@ -217,7 +234,7 @@ class ListRAGDocumentsTool(Tool):
             return json.dumps(stats, ensure_ascii=False, indent=2)
         except Exception as e:
             logger.error(f"List RAG documents failed: {e}")
-            return json.dumps({"error": str(e)}, ensure_ascii=False)
+            return _rag_error_payload(e)
 
 
 class ClearRAGStoreTool(Tool):
@@ -257,7 +274,7 @@ class ClearRAGStoreTool(Tool):
             return json.dumps(result, ensure_ascii=False, indent=2)
         except Exception as e:
             logger.error(f"Clear RAG store failed: {e}")
-            return json.dumps({"error": str(e)}, ensure_ascii=False)
+            return _rag_error_payload(e)
 
 
 class CleanupExpiredRAGTool(Tool):
@@ -284,4 +301,4 @@ class CleanupExpiredRAGTool(Tool):
             return json.dumps(result, ensure_ascii=False, indent=2)
         except Exception as e:
             logger.error(f"Cleanup expired RAG failed: {e}")
-            return json.dumps({"error": str(e)}, ensure_ascii=False)
+            return _rag_error_payload(e)

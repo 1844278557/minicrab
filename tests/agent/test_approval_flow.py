@@ -8,6 +8,7 @@ import pytest
 
 from nanobot.agent.loop import AgentLoop
 from nanobot.agent.runner import AgentRunner, AgentRunSpec
+from nanobot.agent.tools.message import MessageTool
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import GenerationSettings, LLMResponse, ToolCallRequest
@@ -106,6 +107,59 @@ async def test_loop_approval_executes_remember_user_info_after_confirm(tmp_path)
 
 
 @pytest.mark.asyncio
+async def test_loop_approval_message_tool_response_consumes_confirmation(tmp_path) -> None:
+    """审批后如果 message 工具已发消息，确认文本不能再进入普通对话。"""
+    provider = _make_provider()
+    provider.chat_with_retry = AsyncMock(side_effect=[
+        LLMResponse(
+            content="",
+            tool_calls=[
+                ToolCallRequest(
+                    id="call_1",
+                    name="remember_user_info",
+                    arguments={"content": "# User Profile\n\n- 使用 Python。"},
+                )
+            ],
+        ),
+        LLMResponse(
+            content="",
+            tool_calls=[
+                ToolCallRequest(
+                    id="call_2",
+                    name="message",
+                    arguments={"content": "已记住。"},
+                )
+            ],
+        ),
+        LLMResponse(content="内部结束。", tool_calls=[]),
+    ])
+    loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
+    loop.tools.get_definitions = MagicMock(return_value=[])
+    sent_messages = []
+
+    async def collect_message(message):
+        sent_messages.append(message)
+
+    message_tool = loop.tools.get("message")
+    assert isinstance(message_tool, MessageTool)
+    message_tool.set_send_callback(collect_message)
+
+    await loop._process_message(
+        InboundMessage(channel="web", sender_id="user", chat_id="default", content="记住我使用 Python")
+    )
+    response = await loop._process_message(
+        InboundMessage(channel="web", sender_id="user", chat_id="default", content="同意")
+    )
+
+    assert response is None
+    assert [message.content for message in sent_messages] == ["已记住。"]
+    assert provider.chat_with_retry.await_count == 2
+    history = loop.get_session_history("web:default", 100)
+    assert not any(message["role"] == "user" and message["content"] == "同意" for message in history)
+    assert not any("内部结束" in message["content"] for message in history)
+
+
+@pytest.mark.asyncio
 async def test_loop_approval_reject_does_not_execute_tool(tmp_path) -> None:
     """用户拒绝后，原工具不会执行。"""
     provider = _make_provider()
@@ -135,6 +189,50 @@ async def test_loop_approval_reject_does_not_execute_tool(tmp_path) -> None:
     assert response is not None
     assert response.content == "已取消。"
     assert not (tmp_path / "USER.md").exists()
+
+
+@pytest.mark.asyncio
+async def test_loop_reject_suppresses_inline_tool_call_markup(tmp_path) -> None:
+    """拒绝后模型写出的伪工具调用正文不能展示给用户。"""
+    provider = _make_provider()
+    provider.chat_with_retry = AsyncMock(side_effect=[
+        LLMResponse(
+            content="",
+            tool_calls=[
+                ToolCallRequest(
+                    id="call_1",
+                    name="cleanup_expired_rag",
+                    arguments={},
+                )
+            ],
+        ),
+        LLMResponse(
+            content=(
+                "让我继续查看数据库。\n\n"
+                "<｜DSML｜function_calls>\n"
+                "<｜DSML｜invoke name=\"exec\">\n"
+                "<｜DSML｜parameter name=\"command\" string=\"true\">sqlite3 chroma.sqlite3</｜DSML｜parameter>\n"
+                "</｜DSML｜invoke>\n"
+                "</｜DSML｜function_calls>"
+            ),
+            tool_calls=[],
+        ),
+    ])
+    loop = AgentLoop(bus=MessageBus(), provider=provider, workspace=tmp_path, model="test-model")
+    loop.tools.get_definitions = MagicMock(return_value=[])
+
+    await loop._process_message(
+        InboundMessage(channel="web", sender_id="user", chat_id="default", content="查看一下数据库")
+    )
+    response = await loop._process_message(
+        InboundMessage(channel="web", sender_id="user", chat_id="default", content="拒绝")
+    )
+
+    assert response is not None
+    assert response.content == "操作已取消，未执行。"
+    assert "<｜DSML｜function_calls>" not in response.content
+    history = loop.get_session_history("web:default", 100)
+    assert not any("DSML" in message["content"] for message in history)
 
 
 @pytest.mark.asyncio

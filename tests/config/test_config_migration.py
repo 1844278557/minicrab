@@ -26,6 +26,18 @@ def test_load_config_keeps_max_tokens_and_ignores_legacy_memory_window(tmp_path)
     assert not hasattr(config.agents.defaults, "memory_window")
 
 
+def test_load_config_accepts_utf8_bom(tmp_path) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps({"agents": {"defaults": {"timezone": "Asia/Shanghai"}}}),
+        encoding="utf-8-sig",
+    )
+
+    config = load_config(config_path)
+
+    assert config.agents.defaults.timezone == "Asia/Shanghai"
+
+
 def test_save_config_writes_context_window_tokens_but_not_memory_window(tmp_path) -> None:
     config_path = tmp_path / "config.json"
     config_path.write_text(

@@ -10,7 +10,7 @@ from typing import Any, Callable
 from nanobot.agent.hook import AgentHook, AgentHookContext
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
-from nanobot.utils.helpers import build_assistant_message
+from nanobot.utils.helpers import build_assistant_message, contains_tool_call_markup
 
 _DEFAULT_MAX_ITERATIONS_MESSAGE = (
     "I reached the maximum number of tool call iterations ({max_iterations}) "
@@ -37,6 +37,7 @@ class AgentRunSpec:
     fail_on_tool_error: bool = False
     approval_callback: Callable[..., Any] | None = None
     tools_enabled: bool = True
+    stop_after_tools_callback: Callable[[], bool] | None = None
 
 
 @dataclass(slots=True)
@@ -110,6 +111,8 @@ class AgentRunner:
                     if hook.wants_streaming():
                         await hook.on_stream_end(context, resuming=False)
                     clean = hook.finalize_content(context, response.content)
+                    if contains_tool_call_markup(clean):
+                        clean = None
                     final_content = clean or "操作已取消，未执行。"
                     messages.append(build_assistant_message(
                         final_content,
@@ -176,6 +179,15 @@ class AgentRunner:
                         "name": tool_call.name,
                         "content": result,
                     })
+                if (
+                    spec.stop_after_tools_callback is not None
+                    and spec.stop_after_tools_callback()
+                ):
+                    stop_reason = "tool_completed"
+                    context.final_content = None
+                    context.stop_reason = stop_reason
+                    await hook.after_iteration(context)
+                    break
                 await hook.after_iteration(context)
                 continue
 
@@ -183,6 +195,8 @@ class AgentRunner:
                 await hook.on_stream_end(context, resuming=False)
 
             clean = hook.finalize_content(context, response.content)
+            if not spec.tools_enabled and contains_tool_call_markup(clean):
+                clean = "操作已取消，未执行。"
             if response.finish_reason == "error":
                 final_content = clean or spec.error_message or _DEFAULT_ERROR_MESSAGE
                 stop_reason = "error"
