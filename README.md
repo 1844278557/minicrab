@@ -250,7 +250,12 @@ That's it! You have a working AI assistant in 2 minutes.
 
 ### User-requested Memory
 
-When the user explicitly asks nanobot to remember personal facts or preferences, the agent can update `USER.md` through the `remember_user_info` tool. Automatic conversation summaries still use `memory/MEMORY.md`.
+When the user explicitly asks nanobot to remember something, the agent uses `remember_user_info` and routes the update by memory type:
+
+- `USER.md`: stable user identity, preferences, long-term personal facts, and user-level behavior requirements.
+- `memory/MEMORY.md`: durable cross-session experience, business rules, long-term project decisions, and important external information locations.
+
+Conversation compression is separate. When a session gets too large, old raw messages are compacted into the session's `running_summary` so the current conversation can continue, but that compaction does not write `USER.md`, `MEMORY.md`, `HISTORY.md`, or new episode files. Older episodes remain available only as a legacy archive when the user explicitly asks to search old conversations.
 
 ## 💬 Chat Apps
 
@@ -1715,7 +1720,8 @@ nanobot/
 ├── agent/          # 🧠 Core agent logic
 │   ├── loop.py     #    Agent loop (LLM ↔ tool execution)
 │   ├── context.py  #    Prompt builder
-│   ├── memory.py   #    Persistent memory
+│   ├── memory.py   #    Session compaction and memory file helpers
+│   ├── memory_extractor.py # Post-response long-term working memory extraction
 │   ├── skills.py   #    Skills loader
 │   ├── subagent.py #    Background task execution
 │   └── tools/      #    Built-in tools (incl. spawn)

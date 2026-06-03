@@ -8,7 +8,7 @@ Redesign memory boundaries on the `memory-redesign-v1` branch.
 
 ## Active Step
 
-Step 5 completed: keep episode tools as legacy archive only.
+Step 6 completed: update project docs and run final regression tests.
 
 ## Completed Steps
 
@@ -28,10 +28,11 @@ Step 5 completed: keep episode tools as legacy archive only.
 - Stopped token compaction from writing MEMORY.md, HISTORY.md, or new episode files.
 - Added current session summary injection to LLM context.
 - Updated episode tool descriptions so they are only used for explicit old-history archive requests.
+- Updated README and ARCHITECTURE memory design notes for the new USER.md / MEMORY.md / running_summary split.
 
 ## Next Step
 
-- Step 6: update README.md and ARCHITECTURE.md, then run final regression tests.
+- Commit documentation updates and final validation record.
 
 ## Blockers
 
@@ -66,6 +67,8 @@ Step 5 completed: keep episode tools as legacy archive only.
 - Step 4 related regression tests: 35 passed.
 - Step 4 AST syntax check: passed.
 - Step 5 episode + context tests: 45 passed.
+- Step 6 final regression tests: 68 passed.
+- Step 6 AST syntax check: passed.
 
 ## Cautions
 

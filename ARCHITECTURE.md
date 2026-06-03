@@ -14,7 +14,10 @@ This keeps platform integrations separate from the agent core.
 
 - `nanobot/agent/loop.py`: Runs the agent, builds context, calls the model, executes tools, and writes replies back to the bus.
 - `nanobot/agent/approval.py`: Decides whether risky tool calls need user approval and tracks pending confirmations in memory.
-- `nanobot/agent/tools/memory.py`: Updates `USER.md` when the user explicitly asks the agent to remember personal facts or preferences.
+- `nanobot/agent/context.py`: Builds the system prompt from bootstrap files, long-term working memory, current session summary, skills, history, and runtime metadata.
+- `nanobot/agent/memory.py`: Handles token-triggered session compaction into `session.metadata.running_summary` and provides long-term memory file helpers.
+- `nanobot/agent/memory_extractor.py`: After each normal reply, extracts durable working memory into `memory/MEMORY.md` without writing user-profile memory.
+- `nanobot/agent/tools/memory.py`: Updates `USER.md` or `memory/MEMORY.md` when the user explicitly asks the agent to remember something.
 - `nanobot/bus/queue.py`: Provides the inbound and outbound queues used by channels and the agent.
 - `nanobot/bus/events.py`: Defines the message objects passed through the bus.
 - `nanobot/channels/base.py`: Defines the common channel interface.
@@ -63,9 +66,13 @@ First-version decisions:
 
 ## Memory Design
 
-- User-requested memories are saved in `USER.md` through the `remember_user_info` tool.
-- Automatic conversation summaries remain in `memory/MEMORY.md`.
-- `ContextBuilder` loads `USER.md` as a bootstrap file, so saved user facts are available in later conversations.
+- `USER.md` stores stable user identity, preferences, long-term personal facts, and user-level behavior requirements. It is loaded as a bootstrap file.
+- `memory/MEMORY.md` stores durable cross-session working memory such as business rules, long-term project decisions, lessons learned, and important external information locations.
+- The `remember_user_info` tool keeps its existing name but routes explicit user-requested writes with `target=user` or `target=memory`.
+- After a normal reply is saved, `MemoryExtractor` scans only the newly saved turn and may update `memory/MEMORY.md`. It never writes `USER.md`.
+- Token-triggered session compaction writes `session.metadata.running_summary` only. It does not update `USER.md`, `MEMORY.md`, `HISTORY.md`, or episode files.
+- `ContextBuilder` loads `USER.md`, `memory/MEMORY.md`, `CONTEXT.md`, and the current session `running_summary` into the model context.
+- Episode tools remain registered for legacy archive lookup, but they are not a default memory source.
 
 ## RAG Design
 
