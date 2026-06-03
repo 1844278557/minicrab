@@ -126,6 +126,22 @@ def test_long_term_memory_is_truncated_by_budget(tmp_path, monkeypatch) -> None:
     assert "old-content" not in prompt
 
 
+def test_session_summary_is_loaded_into_system_message(tmp_path) -> None:
+    """压缩后的当前会话摘要应进入系统消息。"""
+    workspace = _make_workspace(tmp_path)
+    builder = ContextBuilder(workspace)
+
+    messages = builder.build_messages(
+        history=[],
+        current_message="continue",
+        session_summary="Older context: user already chose Web modal approval.",
+    )
+
+    system_content = messages[0]["content"]
+    assert "# Current Session Summary" in system_content
+    assert "Older context: user already chose Web modal approval." in system_content
+
+
 def test_history_is_trimmed_by_context_budget(tmp_path, monkeypatch) -> None:
     """历史消息过长时，只保留最近的合法片段。"""
     workspace = _make_workspace(tmp_path)

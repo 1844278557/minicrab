@@ -8,7 +8,7 @@ Redesign memory boundaries on the `memory-redesign-v1` branch.
 
 ## Active Step
 
-Step 3 completed: add post-response automatic extraction into MEMORY.md only.
+Step 4 completed: separate session compaction from long-term memory and episode archives.
 
 ## Completed Steps
 
@@ -24,10 +24,13 @@ Step 3 completed: add post-response automatic extraction into MEMORY.md only.
 - Added `MemoryExtractor` to scan newly saved turn messages after replies.
 - Connected post-turn background maintenance to run memory extraction before token consolidation.
 - Added `memory_extracted_until` session metadata to avoid rescanning old messages.
+- Changed token compaction to produce `session.metadata.running_summary`.
+- Stopped token compaction from writing MEMORY.md, HISTORY.md, or new episode files.
+- Added current session summary injection to LLM context.
 
 ## Next Step
 
-- Step 4: separate session compaction from long-term memory and episode archives.
+- Step 5: keep episode tools as legacy archive only.
 
 ## Blockers
 
@@ -43,6 +46,7 @@ Step 3 completed: add post-response automatic extraction into MEMORY.md only.
 - Explicit user memory writes keep the existing `remember_user_info` tool name and use `target=user|memory` for routing.
 - Automatic post-response extraction writes only MEMORY.md and never USER.md.
 - Invalid extraction JSON is skipped and the scan cursor advances to avoid repeated retries on the same messages.
+- Token compaction is for current-session continuity only; long-term memory extraction is handled separately after turns.
 
 ## Validation
 
@@ -56,6 +60,9 @@ Step 3 completed: add post-response automatic extraction into MEMORY.md only.
 - Step 2 user memory + approval tests: 20 passed.
 - Step 3 memory extractor + loop save tests: 9 passed.
 - Step 3 combined related tests: 27 passed.
+- Step 4 compaction target tests: 69 passed.
+- Step 4 related regression tests: 35 passed.
+- Step 4 AST syntax check: passed.
 
 ## Cautions
 

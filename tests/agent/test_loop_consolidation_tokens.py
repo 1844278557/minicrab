@@ -61,7 +61,7 @@ async def test_prompt_above_threshold_triggers_consolidation(tmp_path, monkeypat
 @pytest.mark.asyncio
 async def test_prompt_above_threshold_archives_until_next_user_boundary(tmp_path, monkeypatch) -> None:
     loop = _make_loop(tmp_path, estimated_tokens=1000, context_window_tokens=200)
-    loop.memory_consolidator.consolidate_messages = AsyncMock(return_value=True)  # type: ignore[method-assign]
+    loop.memory_consolidator.consolidate_messages = AsyncMock(return_value="summary after compaction")  # type: ignore[method-assign]
 
     session = loop.sessions.get_or_create("cli:test")
     session.messages = [
@@ -81,6 +81,7 @@ async def test_prompt_above_threshold_archives_until_next_user_boundary(tmp_path
     archived_chunk = loop.memory_consolidator.consolidate_messages.await_args.args[0]
     assert [message["content"] for message in archived_chunk] == ["u1", "a1", "u2", "a2"]
     assert session.last_consolidated == 4
+    assert session.metadata["running_summary"] == "summary after compaction"
 
 
 @pytest.mark.asyncio

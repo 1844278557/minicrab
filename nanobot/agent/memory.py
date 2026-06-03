@@ -6,13 +6,12 @@ import asyncio
 import inspect
 import json
 import weakref
-from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
 
 from loguru import logger
 
-from nanobot.agent.episode import Episode, EpisodeStore, create_episode_from_consolidation
+from nanobot.agent.episode import EpisodeStore
 from nanobot.utils.helpers import ensure_dir, estimate_message_tokens, estimate_prompt_tokens_chain
 
 if TYPE_CHECKING:
@@ -20,12 +19,12 @@ if TYPE_CHECKING:
     from nanobot.session.manager import Session, SessionManager
 
 
-_SAVE_MEMORY_TOOL = [
+_SAVE_SESSION_SUMMARY_TOOL = [
     {
         "type": "function",
         "function": {
-            "name": "save_memory",
-            "description": "Save the memory consolidation result to persistent storage.",
+            "name": "save_session_summary",
+            "description": "Save the updated current-session summary.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -35,41 +34,11 @@ _SAVE_MEMORY_TOOL = [
                     },
                     "summary": {
                         "type": "string",
-                        "description": "A paragraph summarizing key events/decisions/topics. "
-                        "Include detail useful for future retrieval.",
-                    },
-                    "key_points": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "List of key points discussed (3-5 items).",
-                    },
-                    "decisions": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "List of decisions made or conclusions reached.",
-                    },
-                    "entities": {
-                        "type": "object",
-                        "description": "Key entities mentioned: {\"people\": [...], \"projects\": [...], \"concepts\": [...]}",
-                    },
-                    "importance": {
-                        "type": "integer",
-                        "description": "Importance level 1-5 (5=most important). Default 3.",
-                        "minimum": 1,
-                        "maximum": 5,
-                    },
-                    "tags": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "Tags for categorization (e.g., ['project', 'debugging']).",
-                    },
-                    "memory_update": {
-                        "type": "string",
-                        "description": "Full updated long-term memory as markdown. Include all existing "
-                        "facts plus new ones. Return unchanged if nothing new.",
+                        "description": "Full updated session summary in markdown. Include prior summary details "
+                        "that are still needed for the current conversation plus important new context.",
                     },
                 },
-                "required": ["topic", "summary", "memory_update"],
+                "required": ["summary"],
             },
         },
     }
@@ -81,7 +50,7 @@ def _ensure_text(value: Any) -> str:
     return value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
 
 
-def _normalize_save_memory_args(args: Any) -> dict[str, Any] | None:
+def _normalize_tool_args(args: Any) -> dict[str, Any] | None:
     """Normalize provider tool-call arguments to the expected dict shape."""
     if isinstance(args, str):
         try:
@@ -108,9 +77,10 @@ def _is_tool_choice_unsupported(content: str | None) -> bool:
 
 class MemoryStore:
     """
-    Two-layer memory system:
-    - MEMORY.md: Long-term facts (unchanged)
-    - Episodes: Structured conversation history (replaces HISTORY.md)
+    Memory-backed storage helpers.
+
+    MEMORY.md is long-term working memory. Session compaction returns a
+    running summary to the caller instead of writing MEMORY.md or Episodes.
     """
 
     _MAX_FAILURES_BEFORE_RAW_ARCHIVE = 3
@@ -166,38 +136,33 @@ class MemoryStore:
         provider: LLMProvider,
         model: str,
         session_id: str = "unknown",
-    ) -> bool:
-        """
-        Consolidate the provided message chunk into MEMORY.md + Episode.
-
-        Args:
-            messages: Messages to consolidate
-            provider: LLM provider for summarization
-            model: Model to use
-            session_id: Session identifier for the Episode
-        """
+        current_summary: str = "",
+    ) -> str | None:
+        """Compact an old message chunk into an updated current-session summary."""
         if not messages:
-            return True
+            return current_summary
 
-        current_memory = self.read_long_term()
-        prompt = f"""Process this conversation and call the save_memory tool with your consolidation.
+        prompt = f"""Update the current-session summary and call save_session_summary.
 
-## Current Long-term Memory
-{current_memory or "(empty)"}
+This summary is only for continuing the current session after old raw messages
+are removed from the prompt. Do not write long-term memory here.
+
+## Existing Current-Session Summary
+{current_summary or "(empty)"}
 
 ## Conversation to Process
 {self._format_messages(messages)}"""
 
         chat_messages = [
-            {"role": "system", "content": "You are a memory consolidation agent. Analyze the conversation and call the save_memory tool with structured information including topic, summary, key points, decisions, entities, importance, and tags."},
+            {"role": "system", "content": "You are a session compaction agent. Return an updated concise markdown summary for the current conversation only. Preserve current goal, decisions, unresolved issues, recently relevant files, active skills, and facts needed to continue. Do not create long-term memory, do not archive episodes, and do not include raw tool output."},
             {"role": "user", "content": prompt},
         ]
 
         try:
-            forced = {"type": "function", "function": {"name": "save_memory"}}
+            forced = {"type": "function", "function": {"name": "save_session_summary"}}
             response = await provider.chat_with_retry(
                 messages=chat_messages,
-                tools=_SAVE_MEMORY_TOOL,
+                tools=_SAVE_SESSION_SUMMARY_TOOL,
                 model=model,
                 tool_choice=forced,
             )
@@ -208,143 +173,89 @@ class MemoryStore:
                 logger.warning("Forced tool_choice unsupported, retrying with auto")
                 response = await provider.chat_with_retry(
                     messages=chat_messages,
-                    tools=_SAVE_MEMORY_TOOL,
+                    tools=_SAVE_SESSION_SUMMARY_TOOL,
                     model=model,
                     tool_choice="auto",
                 )
 
             if not response.has_tool_calls:
                 logger.warning(
-                    "Memory consolidation: LLM did not call save_memory "
+                    "Session compaction: LLM did not call save_session_summary "
                     "(finish_reason={}, content_len={}, content_preview={})",
                     response.finish_reason,
                     len(response.content or ""),
                     (response.content or "")[:200],
                 )
-                return self._fail_or_raw_archive(messages, session_id)
+                return self._fail_or_raw_summary(messages, current_summary, session_id)
 
-            args = _normalize_save_memory_args(response.tool_calls[0].arguments)
+            args = _normalize_tool_args(response.tool_calls[0].arguments)
             if args is None:
-                logger.warning("Memory consolidation: unexpected save_memory arguments")
-                return self._fail_or_raw_archive(messages, session_id)
+                logger.warning("Session compaction: unexpected save_session_summary arguments")
+                return self._fail_or_raw_summary(messages, current_summary, session_id)
 
-            legacy_history = args.get("history_entry")
-            has_structured_summary = "topic" in args and "summary" in args
-            if (
-                "memory_update" not in args
-                or (legacy_history is None and not has_structured_summary)
-            ):
-                logger.warning("Memory consolidation: save_memory payload missing required fields")
-                return self._fail_or_raw_archive(messages, session_id)
+            summary_source = args.get("summary")
+            if summary_source is None:
+                logger.warning("Session compaction: summary is missing")
+                return self._fail_or_raw_summary(messages, current_summary, session_id)
 
-            update = args.get("memory_update")
-            if update is None:
-                logger.warning("Memory consolidation: memory_update is empty")
-                return self._fail_or_raw_archive(messages, session_id)
-
-            if legacy_history is not None:
-                history_text = _ensure_text(legacy_history).strip()
-                if isinstance(legacy_history, dict):
-                    summary_source = legacy_history.get("summary", legacy_history)
-                    topic_source = legacy_history.get("topic", "Conversation history")
-                else:
-                    summary_source = legacy_history
-                    topic_source = args.get("topic", "Conversation history")
-                topic = _ensure_text(topic_source).strip()
-                summary = _ensure_text(summary_source).strip()
-            else:
-                history_text = ""
-                topic_source = args.get("topic")
-                summary_source = args.get("summary")
-                if topic_source is None or summary_source is None:
-                    logger.warning("Memory consolidation: topic or summary is empty")
-                    return self._fail_or_raw_archive(messages, session_id)
-                topic = _ensure_text(topic_source).strip()
-                summary = _ensure_text(summary_source).strip()
-
-            if not topic or not summary or (legacy_history is not None and not history_text):
-                logger.warning("Memory consolidation: required save_memory value is empty")
-                return self._fail_or_raw_archive(messages, session_id)
-
-            consolidation_result = {
-                "topic": topic,
-                "summary": summary,
-                "key_points": args.get("key_points", []),
-                "decisions": args.get("decisions", []),
-                "entities": args.get("entities", {}),
-                "importance": args.get("importance", 3),
-                "tags": args.get("tags", []),
-            }
-
-            episode = create_episode_from_consolidation(
-                session_id=session_id,
-                messages=messages,
-                consolidation_result=consolidation_result,
-            )
-            self.episode_store.save(episode)
-            self.append_history(legacy_history if legacy_history is not None else consolidation_result)
-
-            update = _ensure_text(update)
-            if update != current_memory:
-                self.write_long_term(update)
-
+            summary = _ensure_text(summary_source).strip()
+            if not summary:
+                logger.warning("Session compaction: summary is empty")
+                return self._fail_or_raw_summary(messages, current_summary, session_id)
             self._consecutive_failures = 0
             logger.info(
-                "Memory consolidation done: episode {} created for {} messages",
-                episode.episode_id,
+                "Session compaction done for {}: {} messages summarized",
+                session_id,
                 len(messages),
             )
-            return True
+            return summary
         except Exception:
-            logger.exception("Memory consolidation failed")
-            return self._fail_or_raw_archive(messages, session_id)
+            logger.exception("Session compaction failed")
+            return self._fail_or_raw_summary(messages, current_summary, session_id)
 
-    def _fail_or_raw_archive(self, messages: list[dict], session_id: str = "unknown") -> bool:
-        """Increment failure count; after threshold, raw-archive messages as Episode."""
+    def _fail_or_raw_summary(
+        self,
+        messages: list[dict],
+        current_summary: str = "",
+        session_id: str = "unknown",
+    ) -> str | None:
+        """失败计数；连续失败后返回确定性兜底摘要，不写长期文件。"""
         self._consecutive_failures += 1
         if self._consecutive_failures < self._MAX_FAILURES_BEFORE_RAW_ARCHIVE:
-            return False
-        self._raw_archive(messages, session_id)
+            return None
+        fallback = self._raw_summary(messages, current_summary, session_id)
         self._consecutive_failures = 0
-        return True
+        return fallback
 
-    def _raw_archive(self, messages: list[dict], session_id: str = "unknown") -> None:
-        """Fallback: create a raw Episode without LLM summarization."""
-        ts = datetime.now().strftime("%Y-%m-%d %H:%M")
+    def _raw_summary(
+        self,
+        messages: list[dict],
+        current_summary: str = "",
+        session_id: str = "unknown",
+    ) -> str:
+        """确定性兜底摘要，避免压缩流程永久卡住。"""
+        formatted = self._format_messages(messages)
+        if len(formatted) > 4000:
+            formatted = formatted[:2000] + "\n...\n" + formatted[-2000:]
         raw_lines = [
-            f"[RAW] {len(messages)} messages archived without summarization",
-            self._format_messages(messages),
+            current_summary.strip(),
+            f"## Compacted Session Chunk ({session_id})",
+            f"{len(messages)} messages were compacted without LLM summarization.",
+            formatted,
         ]
-        self.append_history("\n".join(line for line in raw_lines if line))
-        episode = Episode(
-            episode_id=self.episode_store.generate_episode_id(),
-            session_id=session_id,
-            created_at=datetime.now().isoformat(),
-            trigger="raw_archive",
-            topic="[RAW] Unprocessed messages",
-            summary=f"{len(messages)} messages archived without summarization",
-            key_points=[],
-            decisions=[],
-            entities={},
-            message_range={"start": 0, "end": len(messages)},
-            time_range={"start": ts, "end": ts},
-            token_count=sum(len(str(m.get("content", ""))) // 4 for m in messages),
-            importance=1,
-            tags=["raw", "fallback"],
-            raw_messages=messages,
-        )
-        self.episode_store.save(episode)
         logger.warning(
-            "Memory consolidation degraded: raw-archived {} messages as episode {}",
+            "Session compaction degraded: raw-summary fallback for {} messages in {}",
             len(messages),
-            episode.episode_id,
+            session_id,
         )
+        return "\n\n".join(line for line in raw_lines if line)
 
 
 class MemoryConsolidator:
     """Owns consolidation policy, locking, and session offset updates."""
 
     _MAX_CONSOLIDATION_ROUNDS = 5
+    SESSION_SUMMARY_KEY = "running_summary"
 
     _SAFETY_BUFFER = 1024  # extra headroom for tokenizer estimation drift
 
@@ -377,15 +288,23 @@ class MemoryConsolidator:
         self,
         messages: list[dict[str, object]],
         session_id: str = "unknown",
-    ) -> bool:
-        """Archive a selected message chunk into persistent memory."""
-        return await self.store.consolidate(messages, self.provider, self.model, session_id)
+        current_summary: str = "",
+    ) -> str | None:
+        """Compact a selected message chunk into a session summary."""
+        return await self.store.consolidate(
+            messages,
+            self.provider,
+            self.model,
+            session_id,
+            current_summary=current_summary,
+        )
 
     async def _call_consolidate_messages(
         self,
         messages: list[dict[str, object]],
         session_id: str,
-    ) -> bool:
+        current_summary: str = "",
+    ) -> Any:
         """调用记忆整理，同时兼容旧的一参数替身函数。"""
         try:
             parameters = inspect.signature(self.consolidate_messages).parameters
@@ -393,7 +312,9 @@ class MemoryConsolidator:
             parameters = {}
         if len(parameters) <= 1:
             return await self.consolidate_messages(messages)
-        return await self.consolidate_messages(messages, session_id)
+        if len(parameters) <= 2:
+            return await self.consolidate_messages(messages, session_id)
+        return await self.consolidate_messages(messages, session_id, current_summary)
 
     def pick_consolidation_boundary(
         self,
@@ -426,6 +347,7 @@ class MemoryConsolidator:
             current_message="[token-probe]",
             channel=channel,
             chat_id=chat_id,
+            session_summary=session.metadata.get(self.SESSION_SUMMARY_KEY),
         )
         return estimate_prompt_tokens_chain(
             self.provider,
@@ -500,8 +422,15 @@ class MemoryConsolidator:
                     source,
                     len(chunk),
                 )
-                if not await self._call_consolidate_messages(chunk, session.key):
+                summary_result = await self._call_consolidate_messages(
+                    chunk,
+                    session.key,
+                    str(session.metadata.get(self.SESSION_SUMMARY_KEY) or ""),
+                )
+                if not summary_result:
                     return
+                if isinstance(summary_result, str):
+                    session.metadata[self.SESSION_SUMMARY_KEY] = summary_result
                 session.last_consolidated = end_idx
                 self.sessions.save(session)
 

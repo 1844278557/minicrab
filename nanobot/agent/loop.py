@@ -588,6 +588,9 @@ class AgentLoop:
                 history=history,
                 current_message=msg.content, channel=channel, chat_id=chat_id,
                 current_role=current_role,
+                session_summary=session.metadata.get(
+                    self.memory_consolidator.SESSION_SUMMARY_KEY
+                ),
             )
             run_result = await self._run_agent_loop(
                 messages, channel=channel, chat_id=chat_id,
@@ -646,6 +649,9 @@ class AgentLoop:
             current_message=msg.content,
             media=msg.media if msg.media else None,
             channel=msg.channel, chat_id=msg.chat_id,
+            session_summary=session.metadata.get(
+                self.memory_consolidator.SESSION_SUMMARY_KEY
+            ),
         )
 
         async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:

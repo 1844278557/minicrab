@@ -162,6 +162,7 @@ IMPORTANT: To send files (images, documents, audio, video) to the user, you MUST
         channel: str | None = None,
         chat_id: str | None = None,
         current_role: str = "user",
+        session_summary: str | None = None,
     ) -> list[dict[str, Any]]:
         """Build the complete message list for an LLM call."""
         runtime_ctx = self._build_runtime_context(channel, chat_id, self.timezone)
@@ -175,9 +176,16 @@ IMPORTANT: To send files (images, documents, audio, video) to the user, you MUST
             merged = [{"type": "text", "text": runtime_ctx}] + user_content
 
         trimmed_history = self._trim_history_to_budget(history, self.MAX_HISTORY_CHARS)
+        system_prompt = self.build_system_prompt(skill_names)
+        if session_summary and session_summary.strip():
+            system_prompt += (
+                "\n\n---\n\n# Current Session Summary\n\n"
+                "This summary preserves older conversation context that was compacted out of raw history.\n\n"
+                f"{session_summary.strip()}"
+            )
 
         return [
-            {"role": "system", "content": self.build_system_prompt(skill_names)},
+            {"role": "system", "content": system_prompt},
             *trimmed_history,
             {"role": current_role, "content": merged},
         ]
