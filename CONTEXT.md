@@ -4,20 +4,23 @@ Use this file as the structured task state block. Keep every heading, write shor
 
 ## Current Goal
 
-Make `CONTEXT.md` a clearer structured task state block on the `memory-routing-rules` branch.
+Add an internal LLM-based summarizer for unusually long tool results on the `memory-routing-rules` branch.
 
 ## Active Step
 
-Update the prompt, template, current project context file, and tests for the explicit task-state structure.
+Review and commit the long tool result summarizer implementation.
 
 ## Completed Steps
 
 - Added memory routing rules.
 - Added current task context loading and lightweight context budget trimming.
+- Clarified `CONTEXT.md` as a structured task state block.
+- Added `ToolResultSummarizer` for long string tool outputs.
+- Connected summarization after tool execution and before tool results enter the next LLM context.
 
 ## Next Step
 
-- Run focused tests and commit the task-state structure update to the current branch.
+- Commit the tool result summarizer update to the current branch after final diff review.
 
 ## Blockers
 
@@ -27,12 +30,17 @@ Update the prompt, template, current project context file, and tests for the exp
 
 - Do not implement automatic history recall in this branch.
 - Keep the task state structure simple and prompt-driven instead of adding a new task-state database.
+- Tool result summarization is an internal no-tool LLM call, not an Agent or subagent.
+- Short tool results remain unchanged; long result summary failure falls back to deterministic head/tail truncation.
 
 ## Validation
 
 - Context prompt tests: 10 passed.
 - Context + user memory tests: 16 passed.
 - Syntax check: passed.
+- Runner tests: 10 passed.
+- Runner + context + save-turn tests: 24 passed.
+- Tool summarizer syntax check: passed.
 
 ## Cautions
 

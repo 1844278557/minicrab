@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from nanobot.agent.hook import AgentHook, AgentHookContext
+from nanobot.agent.tool_summary import ToolResultSummarizer
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 from nanobot.utils.helpers import build_assistant_message, contains_tool_call_markup
@@ -157,15 +158,21 @@ class AgentRunner:
                     response.tool_calls,
                 )
                 tool_events.extend(new_events)
-                context.tool_results = list(results)
                 context.tool_events = list(new_events)
                 if fatal_error is not None:
                     error = f"Error: {type(fatal_error).__name__}: {fatal_error}"
                     stop_reason = "tool_error"
                     context.error = error
                     context.stop_reason = stop_reason
+                    context.tool_results = list(results)
                     await hook.after_iteration(context)
                     break
+                results = await self._summarize_tool_results(
+                    spec,
+                    response.tool_calls,
+                    results,
+                )
+                context.tool_results = list(results)
                 messages.append(build_assistant_message(
                     response.content or "",
                     tool_calls=[tc.to_openai_tool_call() for tc in response.tool_calls],
@@ -310,6 +317,19 @@ class AgentRunner:
             if error is not None and fatal_error is None:
                 fatal_error = error
         return results, events, fatal_error
+
+    async def _summarize_tool_results(
+        self,
+        spec: AgentRunSpec,
+        tool_calls: list[ToolCallRequest],
+        results: list[Any],
+    ) -> list[Any]:
+        """摘要超长工具结果；这是内部压缩调用，不是 Agent 行为。"""
+        summarizer = ToolResultSummarizer(self.provider, spec.model)
+        summarized: list[Any] = []
+        for tool_call, result in zip(tool_calls, results):
+            summarized.append(await summarizer.summarize_if_needed(tool_call, result))
+        return summarized
 
     async def _run_tool(
         self,

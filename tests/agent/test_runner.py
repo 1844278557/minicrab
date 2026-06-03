@@ -82,6 +82,101 @@ async def test_runner_preserves_reasoning_fields_and_tool_results():
 
 
 @pytest.mark.asyncio
+async def test_runner_summarizes_long_tool_result_without_tools():
+    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+
+    provider = MagicMock()
+    calls: list[dict] = []
+    captured_final_messages: list[dict] = []
+    long_result = "HEAD-" + ("x" * 13_000) + "-TAIL"
+
+    async def chat_with_retry(**kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            return LLMResponse(
+                content="working",
+                tool_calls=[ToolCallRequest(id="call_1", name="exec", arguments={"command": "pytest"})],
+            )
+        if len(calls) == 2:
+            return LLMResponse(content="- 测试失败摘要\n- 关键错误在尾部")
+        captured_final_messages[:] = kwargs["messages"]
+        return LLMResponse(content="done", tool_calls=[], usage={})
+
+    provider.chat_with_retry = chat_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    tools.execute = AsyncMock(return_value=long_result)
+
+    runner = AgentRunner(provider)
+    result = await runner.run(AgentRunSpec(
+        initial_messages=[],
+        tools=tools,
+        model="test-model",
+        max_iterations=3,
+    ))
+
+    assert result.final_content == "done"
+    summary_call = calls[1]
+    assert summary_call["tools"] == []
+    assert summary_call["tool_choice"] == "none"
+    assert summary_call["max_tokens"] == 700
+    assert summary_call["temperature"] == 0
+
+    tool_messages = [m for m in captured_final_messages if m.get("role") == "tool"]
+    assert len(tool_messages) == 1
+    content = tool_messages[0]["content"]
+    assert "[LLM Tool Result Summary]" in content
+    assert "测试失败摘要" in content
+    assert "[Original Head]" in content
+    assert "[Original Tail]" in content
+    assert len(content) < len(long_result)
+
+
+@pytest.mark.asyncio
+async def test_runner_falls_back_when_tool_result_summary_fails():
+    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+
+    provider = MagicMock()
+    call_count = {"n": 0}
+    captured_final_messages: list[dict] = []
+    long_result = "HEAD-" + ("x" * 13_000) + "-TAIL"
+
+    async def chat_with_retry(**kwargs):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            return LLMResponse(
+                content="working",
+                tool_calls=[ToolCallRequest(id="call_1", name="exec", arguments={"command": "pytest"})],
+            )
+        if call_count["n"] == 2:
+            return LLMResponse(content="summary failed", finish_reason="error")
+        captured_final_messages[:] = kwargs["messages"]
+        return LLMResponse(content="done", tool_calls=[], usage={})
+
+    provider.chat_with_retry = chat_with_retry
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    tools.execute = AsyncMock(return_value=long_result)
+
+    runner = AgentRunner(provider)
+    result = await runner.run(AgentRunSpec(
+        initial_messages=[],
+        tools=tools,
+        model="test-model",
+        max_iterations=3,
+    ))
+
+    assert result.final_content == "done"
+    tool_messages = [m for m in captured_final_messages if m.get("role") == "tool"]
+    assert len(tool_messages) == 1
+    content = tool_messages[0]["content"]
+    assert "[Tool Result Truncated]" in content
+    assert "LLM summary unavailable" in content
+    assert "[Original Head]" in content
+    assert "[Original Tail]" in content
+
+
+@pytest.mark.asyncio
 async def test_runner_calls_hooks_in_order():
     from nanobot.agent.hook import AgentHook, AgentHookContext
     from nanobot.agent.runner import AgentRunSpec, AgentRunner
