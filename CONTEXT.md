@@ -8,7 +8,7 @@ Redesign memory boundaries on the `memory-redesign-v1` branch.
 
 ## Active Step
 
-Step 1 completed: clarified memory boundaries in prompts, skills, and templates.
+Step 2 completed: route explicit memory updates to USER.md or MEMORY.md.
 
 ## Completed Steps
 
@@ -18,10 +18,13 @@ Step 1 completed: clarified memory boundaries in prompts, skills, and templates.
 - Added `ToolResultSummarizer` for long string tool outputs.
 - Connected summarization after tool execution and before tool results enter the next LLM context.
 - Created `memory-redesign-v1` from `memory-routing-rules`.
+- Clarified memory boundaries in prompts, skills, and templates.
+- Added `target` routing to `remember_user_info` for USER.md and memory/MEMORY.md.
+- Updated approval policy wording for both long-term user memory and long-term working memory.
 
 ## Next Step
 
-- Step 2: route explicit memory updates to USER.md or MEMORY.md.
+- Step 3: add post-response automatic extraction into MEMORY.md only.
 
 ## Blockers
 
@@ -34,6 +37,7 @@ Step 1 completed: clarified memory boundaries in prompts, skills, and templates.
 - Tool result summarization is an internal no-tool LLM call, not an Agent or subagent.
 - Short tool results remain unchanged; long result summary failure falls back to deterministic head/tail truncation.
 - USER.md is for user-level memory; MEMORY.md is for durable work memory; RAG is for uploaded documents; episodes are legacy archives.
+- Explicit user memory writes keep the existing `remember_user_info` tool name and use `target=user|memory` for routing.
 
 ## Validation
 
@@ -44,6 +48,7 @@ Step 1 completed: clarified memory boundaries in prompts, skills, and templates.
 - Runner + context + save-turn tests: 24 passed.
 - Tool summarizer syntax check: passed.
 - Step 1 context prompt tests: 10 passed.
+- Step 2 user memory + approval tests: 20 passed.
 
 ## Cautions
 

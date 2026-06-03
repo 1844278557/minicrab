@@ -1,4 +1,4 @@
-"""测试用户主动记忆写入 USER.md 的行为。"""
+"""测试用户主动记忆写入长期记忆文件的行为。"""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from nanobot.providers.base import GenerationSettings
 
 @pytest.mark.asyncio
 async def test_remember_user_info_creates_user_md(tmp_path) -> None:
-    """用户主动记忆工具会创建 USER.md。"""
+    """默认目标会创建 USER.md。"""
     tool = RememberUserInfoTool(workspace=tmp_path)
     content = "# User Profile\n\n- 女朋友生日是 5 月 20 日。"
 
@@ -23,6 +23,19 @@ async def test_remember_user_info_creates_user_md(tmp_path) -> None:
 
     assert result.startswith("USER.md updated.")
     assert (tmp_path / "USER.md").read_text(encoding="utf-8") == content + "\n"
+
+
+@pytest.mark.asyncio
+async def test_remember_user_info_creates_memory_md(tmp_path) -> None:
+    """工作记忆目标会创建 memory/MEMORY.md。"""
+    tool = RememberUserInfoTool(workspace=tmp_path)
+    content = "# Working Memory\n\n- Web 端审批使用弹窗。"
+
+    result = await tool.execute(content=content, target="memory", reason="用户明确要求记住")
+
+    assert result.startswith("MEMORY.md updated.")
+    assert (tmp_path / "memory" / "MEMORY.md").read_text(encoding="utf-8") == content + "\n"
+    assert not (tmp_path / "USER.md").exists()
 
 
 @pytest.mark.asyncio
@@ -40,7 +53,7 @@ async def test_remember_user_info_replaces_existing_user_md(tmp_path) -> None:
 
 @pytest.mark.asyncio
 async def test_remember_user_info_rejects_empty_content(tmp_path) -> None:
-    """空内容不会覆盖已有 USER.md。"""
+    """空内容不会覆盖已有记忆。"""
     user_file = tmp_path / "USER.md"
     user_file.write_text("# User Profile\n\n- 已有信息。", encoding="utf-8")
     tool = RememberUserInfoTool(workspace=tmp_path)
@@ -49,6 +62,18 @@ async def test_remember_user_info_rejects_empty_content(tmp_path) -> None:
 
     assert result.startswith("Error:")
     assert user_file.read_text(encoding="utf-8") == "# User Profile\n\n- 已有信息。"
+
+
+@pytest.mark.asyncio
+async def test_remember_user_info_rejects_unknown_target(tmp_path) -> None:
+    """未知目标不会写入任何长期记忆文件。"""
+    tool = RememberUserInfoTool(workspace=tmp_path)
+
+    result = await tool.execute(content="# Memory\n\n- 内容。", target="project")
+
+    assert result.startswith("Error:")
+    assert not (tmp_path / "USER.md").exists()
+    assert not (tmp_path / "memory" / "MEMORY.md").exists()
 
 
 def test_user_md_is_loaded_into_system_prompt(tmp_path) -> None:
@@ -78,16 +103,17 @@ def test_agent_loop_registers_remember_user_info_tool(tmp_path) -> None:
     assert loop.tools.has("remember_user_info")
     schema = loop.tools.get("remember_user_info").to_schema()
     assert schema["function"]["parameters"]["required"] == ["content"]
+    assert schema["function"]["parameters"]["properties"]["target"]["enum"] == ["user", "memory"]
 
 
-def test_remember_user_info_schema_excludes_non_profile_memory(tmp_path) -> None:
-    """工具说明应避免把项目状态、工具输出或文档内容写入 USER.md。"""
+def test_remember_user_info_schema_explains_memory_routing(tmp_path) -> None:
+    """工具说明应说明 USER.md 和 MEMORY.md 的记忆边界。"""
     tool = RememberUserInfoTool(workspace=tmp_path)
 
     description = tool.description
 
-    assert "personal facts, preferences, or profile information" in description
-    assert "Do not use this for automatic conversation summaries" in description
-    assert "project status" in description
-    assert "tool output" in description
+    assert "Use target='user'" in description
+    assert "Use target='memory'" in description
+    assert "business rules" in description
+    assert "raw tool output" in description
     assert "document contents" in description

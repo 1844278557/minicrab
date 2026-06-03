@@ -6,13 +6,19 @@ from nanobot.agent.approval import ApprovalPolicy
 
 
 def test_remember_user_info_requires_approval(tmp_path) -> None:
-    """写入长期用户记忆需要审核。"""
+    """写入长期记忆需要审核，并按目标说明影响。"""
     policy = ApprovalPolicy(tmp_path)
 
     decision = policy.evaluate("remember_user_info", {"content": "生日是 5.20"})
 
     assert decision is not None
     assert "USER.md" in decision.reason
+    memory_decision = policy.evaluate(
+        "remember_user_info",
+        {"content": "审批弹窗不进入历史消息", "target": "memory"},
+    )
+    assert memory_decision is not None
+    assert "MEMORY.md" in memory_decision.reason
 
 
 def test_safe_exec_does_not_require_approval(tmp_path) -> None:
@@ -38,6 +44,7 @@ def test_workspace_write_policy(tmp_path) -> None:
 
     assert policy.evaluate("write_file", {"path": "notes.md", "content": "ok"}) is None
     assert policy.evaluate("edit_file", {"path": "USER.md", "old_text": "a", "new_text": "b"}) is not None
+    assert policy.evaluate("edit_file", {"path": "memory/MEMORY.md", "old_text": "a", "new_text": "b"}) is not None
     assert policy.evaluate("edit_file", {"path": ".env", "old_text": "a", "new_text": "b"}) is not None
     assert policy.evaluate("write_file", {"path": str(tmp_path.parent / "outside.txt"), "content": "x"}) is not None
 

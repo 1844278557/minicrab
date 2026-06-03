@@ -60,10 +60,6 @@ class ApprovalPolicy:
     """判断哪些工具调用必须人工审核。"""
 
     _APPROVAL_TOOLS = {
-        "remember_user_info": ApprovalDecision(
-            summary="写入长期用户记忆",
-            reason="会把信息长期保存到 USER.md。",
-        ),
         "clear_rag_store": ApprovalDecision(
             summary="清空 RAG 知识库",
             reason="会删除所有已索引文档和向量数据。",
@@ -109,6 +105,8 @@ class ApprovalPolicy:
         chat_id: str = "",
     ) -> ApprovalDecision | None:
         """判断一次工具调用是否需要人工审核。"""
+        if tool_name == "remember_user_info":
+            return self._evaluate_memory_update(arguments)
         if tool_name in self._APPROVAL_TOOLS:
             return self._APPROVAL_TOOLS[tool_name]
         if tool_name == "exec":
@@ -153,12 +151,30 @@ class ApprovalPolicy:
                 summary="修改长期用户记忆文件",
                 reason="会直接修改 USER.md，影响长期用户记忆。",
             )
+        if self._is_working_memory_path(resolved):
+            return ApprovalDecision(
+                summary="修改长期工作记忆文件",
+                reason="会直接修改 memory/MEMORY.md，影响长期工作记忆。",
+            )
         if self._is_sensitive_path(resolved):
             return ApprovalDecision(
                 summary=f"修改敏感文件：{resolved.name}",
                 reason="目标文件可能包含配置、密钥或账号凭证。",
             )
         return None
+
+    def _evaluate_memory_update(self, arguments: dict[str, Any]) -> ApprovalDecision:
+        """长期记忆写入都需要用户确认，并按目标文件说明影响。"""
+        target = str(arguments.get("target") or "user").lower()
+        if target == "memory":
+            return ApprovalDecision(
+                summary="写入长期工作记忆",
+                reason="会把信息长期保存到 memory/MEMORY.md。",
+            )
+        return ApprovalDecision(
+            summary="写入长期用户记忆",
+            reason="会把信息长期保存到 USER.md。",
+        )
 
     def _evaluate_cron(self, arguments: dict[str, Any]) -> ApprovalDecision | None:
         """判断定时任务变更是否需要确认。"""
@@ -204,6 +220,14 @@ class ApprovalPolicy:
     def _is_user_memory_path(self, path: Path) -> bool:
         """判断路径是否是根目录 USER.md。"""
         return path.name.lower() == "user.md" and path.parent == self.workspace
+
+    def _is_working_memory_path(self, path: Path) -> bool:
+        """判断路径是否是 memory/MEMORY.md。"""
+        return (
+            path.name.lower() == "memory.md"
+            and path.parent.name.lower() == "memory"
+            and path.parent.parent == self.workspace
+        )
 
     def _is_sensitive_path(self, path: Path) -> bool:
         """判断路径是否看起来像敏感配置或密钥文件。"""
@@ -381,7 +405,10 @@ class ApprovalManager:
         """把内部工具调用转换成用户能理解的动作说明。"""
         args = request.arguments
         if request.tool_name == "remember_user_info":
-            return "更新长期记忆", ["说明：会写入 USER.md，影响以后对话中的长期记忆。"]
+            target = str(args.get("target") or "user").lower()
+            if target == "memory":
+                return "更新长期工作记忆", ["目标：memory/MEMORY.md", "说明：会影响以后对话中的长期工作记忆。"]
+            return "更新长期用户记忆", ["目标：USER.md", "说明：会影响以后对话中的长期用户记忆。"]
         if request.tool_name == "clear_rag_store":
             return "清空知识库", ["说明：会删除所有已索引文档和向量数据。"]
         if request.tool_name == "remove_rag_document":
