@@ -1,6 +1,6 @@
 ---
 name: memory
-description: Two-layer memory system with Episode-based recall.
+description: Two-file memory system for user profile memory and durable working memory.
 always: true
 ---
 
@@ -8,40 +8,30 @@ always: true
 
 ## Structure
 
-- `memory/MEMORY.md` — Long-term facts (preferences, project context, relationships). Always loaded into your context.
-- `memory/episodes/` — Structured conversation history (Episodes). NOT loaded into context. Use the `search_episodes` tool to search past conversations.
+- `USER.md` — Stable user identity, preferences, personal facts, and long-term behavior requirements. Loaded into context.
+- `memory/MEMORY.md` — Durable cross-session experience, business rules, long-term project decisions, and important external information locations. Loaded into context while small.
+- `memory/episodes/` — Legacy archive of older conversation summaries. Not a default memory source.
 
-## Search Past Episodes
+## Routing Rules
 
-Use the `search_episodes` tool when you need to recall past conversations:
+- Use `USER.md` for facts about the user: identity, preferences, relationships, dates, language, timezone, and how the assistant should behave for this user.
+- Use `memory/MEMORY.md` for reusable work knowledge: business rules, durable project decisions, lessons learned, and where important external information can be found.
+- Use `CONTEXT.md` for the current task state: goal, active step, completed steps, next step, blockers, decisions, validation, and cautions.
+- Use RAG for uploaded documents and reference files that the user wants to query later.
+- Do not put raw tool output, document contents, temporary chat, or current task progress into `USER.md` or `MEMORY.md`.
 
-```
-search_episodes(query="keyword or topic", time_start="2024-01-01", time_end="2024-12-31")
-```
+## Explicit Memory Requests
 
-The tool supports:
-- **Keyword search**: Find episodes by topic, summary, or key points
-- **Time range filter**: Narrow down to a specific date range
-- **Tag filter**: Search by tags like "bug", "feature", "discussion"
+When the user explicitly asks to remember something, choose the destination by content:
 
-## Episode Structure
+- Personal/user-level information → `USER.md`
+- Business rules, reusable project knowledge, or long-term decisions → `memory/MEMORY.md`
+- Unclear destination → ask one short clarification before writing
 
-Each Episode contains:
-- **topic**: Main topic of the conversation
-- **summary**: Brief summary of what was discussed
-- **key_points**: Important points from the conversation
-- **decisions**: Any decisions made
-- **entities**: People, projects, or concepts mentioned
-- **importance**: 1-5 rating (higher = more important)
-- **tags**: Categorical labels
+## Episode Archive
 
-## When to Update MEMORY.md
-
-Write important facts immediately using `edit_file` or `write_file`:
-- User preferences ("I prefer dark mode")
-- Project context ("The API uses OAuth2")
-- Relationships ("Alice is the project lead")
+Use episode tools only when the user explicitly asks about old conversations, previous discussions, or historical context that is not already present in `USER.md`, `MEMORY.md`, `CONTEXT.md`, or recent chat history.
 
 ## Auto-consolidation
 
-Old conversations are automatically summarized and stored as Episodes when the session grows large. Long-term facts are extracted to MEMORY.md. You don't need to manage this.
+Old conversations may be compacted when the session grows large. Treat compaction as session continuity, not as a reason to store everything in long-term memory.

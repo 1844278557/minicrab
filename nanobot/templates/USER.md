@@ -1,12 +1,18 @@
-# User Profile
+# User Memory
 
-Information about the user to help personalize interactions.
+Stable information about the user that should affect future conversations.
 
 ## Basic Information
 
 - **Name**: (your name)
 - **Timezone**: (your timezone, e.g., UTC+8)
 - **Language**: (preferred language)
+
+## Long-term Personal Facts
+
+- **Birthday**: (important personal dates)
+- **Relationships**: (important people or relationships)
+- **Location/Region**: (stable location context, if useful)
 
 ## Preferences
 
@@ -31,7 +37,6 @@ Information about the user to help personalize interactions.
 ## Work Context
 
 - **Primary Role**: (your role, e.g., developer, researcher)
-- **Main Projects**: (what you're working on)
 - **Tools You Use**: (IDEs, languages, frameworks)
 
 ## Topics of Interest
@@ -42,7 +47,15 @@ Information about the user to help personalize interactions.
 
 ## Special Instructions
 
-(Any specific instructions for how the assistant should behave)
+(Long-term requirements for how the assistant should behave for this user)
+
+## Do Not Store Here
+
+- Temporary chat
+- Current task progress
+- Raw tool output
+- Full document contents
+- Project decisions that belong in memory/MEMORY.md
 
 ---
 

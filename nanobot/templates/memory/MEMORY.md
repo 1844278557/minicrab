@@ -1,23 +1,29 @@
-# Long-term Memory
+# Working Memory
 
-This file stores important information that should persist across sessions.
+Durable cross-session knowledge that is useful beyond one conversation.
 
-## User Information
+## Business Rules
 
-(Important facts about the user)
+- 
 
-## Preferences
+## Project Decisions
 
-(User preferences learned over time)
+- 
 
-## Project Context
+## Lessons Learned
 
-(Information about ongoing projects)
+- 
 
-## Important Notes
+## Important External Information
 
-(Things to remember)
+- 
+
+## Do Not Store Here
+
+- User identity, preferences, personal facts, or behavior requirements; put those in USER.md.
+- Temporary chat, raw tool output, current task progress, or full document contents.
+- Uploaded documents themselves; index those through RAG when the user wants document Q&A.
 
 ---
 
-*This file is automatically updated by nanobot when important information should be remembered.*
+*This file is maintained by nanobot for durable work memory.*

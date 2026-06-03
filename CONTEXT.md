@@ -4,11 +4,11 @@ Use this file as the structured task state block. Keep every heading, write shor
 
 ## Current Goal
 
-Add an internal LLM-based summarizer for unusually long tool results on the `memory-routing-rules` branch.
+Redesign memory boundaries on the `memory-redesign-v1` branch.
 
 ## Active Step
 
-Review and commit the long tool result summarizer implementation.
+Step 1 completed: clarified memory boundaries in prompts, skills, and templates.
 
 ## Completed Steps
 
@@ -17,10 +17,11 @@ Review and commit the long tool result summarizer implementation.
 - Clarified `CONTEXT.md` as a structured task state block.
 - Added `ToolResultSummarizer` for long string tool outputs.
 - Connected summarization after tool execution and before tool results enter the next LLM context.
+- Created `memory-redesign-v1` from `memory-routing-rules`.
 
 ## Next Step
 
-- Commit the tool result summarizer update to the current branch after final diff review.
+- Step 2: route explicit memory updates to USER.md or MEMORY.md.
 
 ## Blockers
 
@@ -32,6 +33,7 @@ Review and commit the long tool result summarizer implementation.
 - Keep the task state structure simple and prompt-driven instead of adding a new task-state database.
 - Tool result summarization is an internal no-tool LLM call, not an Agent or subagent.
 - Short tool results remain unchanged; long result summary failure falls back to deterministic head/tail truncation.
+- USER.md is for user-level memory; MEMORY.md is for durable work memory; RAG is for uploaded documents; episodes are legacy archives.
 
 ## Validation
 
@@ -41,6 +43,7 @@ Review and commit the long tool result summarizer implementation.
 - Runner tests: 10 passed.
 - Runner + context + save-turn tests: 24 passed.
 - Tool summarizer syntax check: passed.
+- Step 1 context prompt tests: 10 passed.
 
 ## Cautions
 

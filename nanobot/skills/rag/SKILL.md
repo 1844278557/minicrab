@@ -9,6 +9,13 @@ metadata: {"nanobot":{"emoji":"📚","requires":{"pip":["chromadb","markitdown"]
 将用户上传的文档（PDF、DOCX、Markdown、代码等）索引到向量知识库，
 支持基于文档内容的持续问答。
 
+## 与长期记忆的区别
+
+- RAG 用于用户上传的文档、资料、论文、合同、代码文件等外部内容。
+- `USER.md` 用于用户身份、偏好、长期个人事实和对助手行为的长期要求。
+- `memory/MEMORY.md` 用于跨会话仍有价值的经验、业务规则、长期项目决策和重要外部信息位置。
+- 不要把用户个人资料或项目决策当作文档索引到 RAG；也不要把完整文档内容写入长期记忆。
+
 ## 与 summarize 的区别
 
 | 特性 | RAG | summarize |

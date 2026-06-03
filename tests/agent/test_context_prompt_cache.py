@@ -85,12 +85,13 @@ def test_system_prompt_contains_memory_routing_rules(tmp_path) -> None:
     prompt = builder.build_system_prompt()
 
     assert "## Memory Routing Guidelines" in prompt
-    assert "USER.md is for stable user profile facts and preferences only" in prompt
+    assert "USER.md is for stable user identity, preferences" in prompt
     assert "CONTEXT.md is for the current local project state only" in prompt
     assert "Current Goal, Active Step, Completed Steps, Next Step, Blockers, Key Decisions, Validation, and Cautions" in prompt
-    assert "MEMORY.md is automatic long-term conversation memory" in prompt
+    assert "MEMORY.md is for durable cross-session experience" in prompt
     assert "RAG is for uploaded documents and reference files" in prompt
-    assert "Do not store temporary chat, tool output, project implementation notes, or document contents in USER.md" in prompt
+    assert "Episodes are a legacy archive of old conversations" in prompt
+    assert "Do not store temporary chat, raw tool output, document contents, or current task progress in USER.md or MEMORY.md" in prompt
 
 
 def test_context_md_is_loaded_as_task_state_block(tmp_path) -> None:
