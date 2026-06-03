@@ -19,7 +19,7 @@ def test_single_approval_prompt_hides_internal_id(tmp_path) -> None:
 
     assert event is not None
     content = event["content"]
-    assert "要我更新长期记忆吗？" in content
+    assert "要我更新长期用户记忆吗？" in content
     assert "回复“确认”继续" in content
     assert "A-" not in content
     assert "编号" not in content
@@ -66,7 +66,7 @@ def test_multiple_approval_prompt_uses_numbered_choices(tmp_path) -> None:
 
     assert first is not None
     assert second is not None
-    assert "1. 更新长期记忆" in second["content"]
+    assert "1. 更新长期用户记忆" in second["content"]
     assert "2. 清空知识库" in second["content"]
     assert "确认 1" in second["content"]
     assert "A-" not in second["content"]

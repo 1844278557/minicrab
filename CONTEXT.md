@@ -8,7 +8,7 @@ Redesign memory boundaries on the `memory-redesign-v1` branch.
 
 ## Active Step
 
-Step 6 completed: update project docs and run final regression tests.
+Full test suite passed after final test compatibility fixes.
 
 ## Completed Steps
 
@@ -29,10 +29,12 @@ Step 6 completed: update project docs and run final regression tests.
 - Added current session summary injection to LLM context.
 - Updated episode tool descriptions so they are only used for explicit old-history archive requests.
 - Updated README and ARCHITECTURE memory design notes for the new USER.md / MEMORY.md / running_summary split.
+- Updated approval prompt tests for the new USER.md-specific approval wording.
+- Updated the exec timeout test to use the current Python executable instead of Unix `sleep`, so it works on Windows.
 
 ## Next Step
 
-- Commit documentation updates and final validation record.
+- Review branch changes before merging into main.
 
 ## Blockers
 
@@ -69,6 +71,7 @@ Step 6 completed: update project docs and run final regression tests.
 - Step 5 episode + context tests: 45 passed.
 - Step 6 final regression tests: 68 passed.
 - Step 6 AST syntax check: passed.
+- Full test suite: 741 passed, 1 skipped.
 
 ## Cautions
 
