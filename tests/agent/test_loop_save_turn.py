@@ -1,3 +1,7 @@
+from unittest.mock import AsyncMock
+
+import pytest
+
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.loop import AgentLoop
 from nanobot.session.manager import Session
@@ -72,3 +76,27 @@ def test_save_turn_keeps_tool_results_under_16k() -> None:
     )
 
     assert session.messages[0]["content"] == content
+
+
+@pytest.mark.asyncio
+async def test_post_turn_maintenance_runs_memory_extraction_before_consolidation() -> None:
+    """后台维护先提取工作记忆，再检查是否需要压缩。"""
+    loop = _mk_loop()
+    session = Session(key="web:default")
+    events: list[str] = []
+
+    class _Extractor:
+        async def extract_new(self, _session, _sessions, *, start_index=None):
+            events.append(f"extract:{start_index}")
+
+    class _Consolidator:
+        async def maybe_consolidate_by_tokens(self, _session):
+            events.append("consolidate")
+
+    loop.memory_extractor = _Extractor()
+    loop.memory_consolidator = _Consolidator()
+    loop.sessions = AsyncMock()
+
+    await loop._post_turn_maintenance(session, start_index=3)
+
+    assert events == ["extract:3", "consolidate"]

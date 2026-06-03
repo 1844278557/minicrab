@@ -100,6 +100,7 @@ class Session:
         """Clear all messages and reset session to initial state."""
         self.messages = []
         self.last_consolidated = 0
+        self.metadata = {}
         self.updated_at = datetime.now()
 
     def retain_recent_legal_suffix(self, max_messages: int) -> None:
@@ -126,6 +127,12 @@ class Session:
         dropped = len(self.messages) - len(retained)
         self.messages = retained
         self.last_consolidated = max(0, self.last_consolidated - dropped)
+        if "memory_extracted_until" in self.metadata:
+            try:
+                extracted_until = int(self.metadata["memory_extracted_until"])
+            except (TypeError, ValueError):
+                extracted_until = 0
+            self.metadata["memory_extracted_until"] = max(0, extracted_until - dropped)
         self.updated_at = datetime.now()
 
 

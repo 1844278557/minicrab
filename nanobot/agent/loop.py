@@ -18,6 +18,7 @@ from nanobot.agent.context import ContextBuilder
 from nanobot.agent.episode import EpisodeStore
 from nanobot.agent.hook import AgentHook, AgentHookContext
 from nanobot.agent.memory import MemoryConsolidator
+from nanobot.agent.memory_extractor import MemoryExtractor
 from nanobot.agent.rag.store import RAGStore
 from nanobot.agent.runner import AgentRunner, AgentRunSpec
 from nanobot.agent.skills import BUILTIN_SKILLS_DIR
@@ -175,6 +176,7 @@ class AgentLoop:
             get_tool_definitions=self.tools.get_definitions,
             max_completion_tokens=provider.generation.max_tokens,
         )
+        self.memory_extractor = MemoryExtractor(workspace, provider, self.model)
         self._register_default_tools()
         self.commands = CommandRouter()
         register_builtin_commands(self.commands)
@@ -517,6 +519,40 @@ class AgentLoop:
         self._background_tasks.append(task)
         task.add_done_callback(self._background_tasks.remove)
 
+    def _schedule_post_turn_maintenance(
+        self,
+        session: Session,
+        *,
+        start_index: int | None = None,
+    ) -> None:
+        """后台执行回复后的记忆提取和上下文压缩检查。"""
+        self._schedule_background(self._post_turn_maintenance(session, start_index=start_index))
+
+    async def _post_turn_maintenance(
+        self,
+        session: Session,
+        *,
+        start_index: int | None = None,
+    ) -> None:
+        """串行执行后台维护，避免多个任务同时保存同一个 session。"""
+        try:
+            await self.memory_extractor.extract_new(
+                session,
+                self.sessions,
+                start_index=start_index,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Post-turn memory extraction failed")
+
+        try:
+            await self.memory_consolidator.maybe_consolidate_by_tokens(session)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Post-turn token consolidation failed")
+
     def stop(self) -> None:
         """Stop the agent loop."""
         self._running = False
@@ -559,9 +595,10 @@ class AgentLoop:
                 session_key=key,
             )
             final_content, _, all_msgs = run_result
+            previous_message_count = len(session.messages)
             self._save_turn(session, all_msgs, 1 + len(history))
             self.sessions.save(session)
-            self._schedule_background(self.memory_consolidator.maybe_consolidate_by_tokens(session))
+            self._schedule_post_turn_maintenance(session, start_index=previous_message_count)
             if run_result.stop_reason == "approval_required" and run_result.approval_event:
                 return self._approval_outbound(
                     channel=channel,
@@ -644,9 +681,10 @@ class AgentLoop:
         if final_content is None:
             final_content = "I've completed processing but have no response to give."
 
+        previous_message_count = len(session.messages)
         self._save_turn(session, all_msgs, 1 + len(history))
         self.sessions.save(session)
-        self._schedule_background(self.memory_consolidator.maybe_consolidate_by_tokens(session))
+        self._schedule_post_turn_maintenance(session, start_index=previous_message_count)
 
         if (mt := self.tools.get("message")) and isinstance(mt, MessageTool) and mt._sent_in_turn:
             return None
@@ -780,9 +818,10 @@ class AgentLoop:
         )
         final_content, _, all_msgs = run_result
         session = self.sessions.get_or_create(session_key)
+        previous_message_count = len(session.messages)
         self._save_turn(session, all_msgs, approval.resume_save_skip)
         self.sessions.save(session)
-        self._schedule_background(self.memory_consolidator.maybe_consolidate_by_tokens(session))
+        self._schedule_post_turn_maintenance(session, start_index=previous_message_count)
 
         if run_result.stop_reason == "approval_required" and run_result.approval_event:
             return self._approval_outbound(
