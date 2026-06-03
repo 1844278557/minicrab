@@ -1,22 +1,26 @@
 # Current Task State
 
-Use this file as the current task summary block. Keep it short and update it after meaningful project work.
+Use this file as the structured task state block. Keep every heading, write short bullets, and update it after meaningful project work.
 
 ## Current Goal
 
 (What the assistant is currently trying to accomplish.)
 
-## Completed
+## Active Step
 
-- 
+(The single step currently being worked on.)
 
-## In Progress
+## Completed Steps
 
 - 
 
 ## Next Step
 
 - 
+
+## Blockers
+
+- None
 
 ## Key Decisions
 

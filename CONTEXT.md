@@ -1,5 +1,40 @@
-# 当前状态（2026-06-01）
+# Current Task State
 
-- 当前正在做什么：实现当前任务摘要块和轻量上下文预算管理，不做自动历史召回。
-- 上次停在哪个位置：`CONTEXT.md` 已作为任务摘要块加载；历史消息会按预算保留最近合法片段；过长 `MEMORY.md` 会截断并标注；相关测试通过。
-- 近期关键决定和原因：优先保留当前请求、近期对话、`USER.md` 和 `CONTEXT.md`，先用简单字符预算控制上下文，避免引入复杂召回或记忆数据库重构。
+Use this file as the structured task state block. Keep every heading, write short bullets, and update it after meaningful project work.
+
+## Current Goal
+
+Make `CONTEXT.md` a clearer structured task state block on the `memory-routing-rules` branch.
+
+## Active Step
+
+Update the prompt, template, current project context file, and tests for the explicit task-state structure.
+
+## Completed Steps
+
+- Added memory routing rules.
+- Added current task context loading and lightweight context budget trimming.
+
+## Next Step
+
+- Run focused tests and commit the task-state structure update to the current branch.
+
+## Blockers
+
+- None.
+
+## Key Decisions
+
+- Do not implement automatic history recall in this branch.
+- Keep the task state structure simple and prompt-driven instead of adding a new task-state database.
+
+## Validation
+
+- Context prompt tests: 10 passed.
+- Context + user memory tests: 16 passed.
+- Syntax check: passed.
+
+## Cautions
+
+- Do not merge this branch into `main` until the user reviews it.
+- Leave unrelated `docs/NANOBOT_INTERVIEW_QA.md` changes uncommitted.

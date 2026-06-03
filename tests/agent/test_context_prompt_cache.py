@@ -31,6 +31,24 @@ def test_bootstrap_files_are_backed_by_templates() -> None:
         assert (template_dir / filename).is_file(), f"missing bootstrap template: {filename}"
 
 
+def test_context_template_uses_structured_task_state() -> None:
+    """CONTEXT.md 模板应保留稳定任务状态字段。"""
+    template_dir = pkg_files("nanobot") / "templates"
+    content = (template_dir / "CONTEXT.md").read_text(encoding="utf-8")
+
+    for heading in (
+        "## Current Goal",
+        "## Active Step",
+        "## Completed Steps",
+        "## Next Step",
+        "## Blockers",
+        "## Key Decisions",
+        "## Validation",
+        "## Cautions",
+    ):
+        assert heading in content
+
+
 def test_system_prompt_stays_stable_when_clock_changes(tmp_path, monkeypatch) -> None:
     """System prompt should not change just because wall clock minute changes."""
     monkeypatch.setattr(datetime_module, "datetime", _FakeDatetime)
@@ -69,6 +87,7 @@ def test_system_prompt_contains_memory_routing_rules(tmp_path) -> None:
     assert "## Memory Routing Guidelines" in prompt
     assert "USER.md is for stable user profile facts and preferences only" in prompt
     assert "CONTEXT.md is for the current local project state only" in prompt
+    assert "Current Goal, Active Step, Completed Steps, Next Step, Blockers, Key Decisions, Validation, and Cautions" in prompt
     assert "MEMORY.md is automatic long-term conversation memory" in prompt
     assert "RAG is for uploaded documents and reference files" in prompt
     assert "Do not store temporary chat, tool output, project implementation notes, or document contents in USER.md" in prompt
