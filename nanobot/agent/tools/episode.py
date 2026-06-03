@@ -1,12 +1,5 @@
 # nanobot/agent/tools/episode.py
-"""
-Episode检索工具 - 供LLM自主判断是否需要检索历史记忆
-
-设计理念：
-- 作为Tool注册到工具系统，LLM可自主调用
-- 类似原有的grep工具，由LLM判断是否需要检索
-- 支持多种检索方式：关键词、时间范围、标签、语义
-"""
+"""Episode旧历史档案工具：只在用户明确要求回看旧对话时使用。"""
 
 from typing import Any
 
@@ -16,14 +9,10 @@ from nanobot.agent.episode import EpisodeStore, EpisodeRetriever
 
 class SearchEpisodesTool(Tool):
     """
-    Episode检索工具
-    
-    让LLM能够自主检索历史记忆，判断是否需要回顾过去的对话。
-    支持多种检索维度：
-    - query: 关键词/语义搜索
-    - time_start/time_end: 时间范围
-    - tags: 标签过滤
-    - min_importance: 重要性过滤
+    Episode旧历史档案检索工具。
+
+    Episode 不再是默认记忆来源。只有当用户明确要求查看旧对话、
+    搜索历史档案或追溯早期讨论时才使用。
     """
     
     def __init__(self, store: EpisodeStore):
@@ -43,10 +32,10 @@ class SearchEpisodesTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "搜索历史记忆(Episodes)。"
-            "当你需要回顾过去的对话、查找之前讨论过的内容、"
-            "或者用户提到'之前'、'上次'、'记得吗'等关键词时，"
-            "使用此工具检索相关历史记忆。"
+            "搜索旧对话档案(Episodes)。"
+            "Episode 是 legacy archive，不是默认记忆来源。"
+            "仅当用户明确要求查看、搜索、追溯旧对话档案时使用。"
+            "普通当前任务、长期用户信息、长期工作记忆和文档问答不要使用此工具。"
             "支持关键词搜索、时间范围过滤、标签过滤。"
         )
     
@@ -209,9 +198,7 @@ class SearchEpisodesTool(Tool):
 
 class ListRecentEpisodesTool(Tool):
     """
-    列出最近的Episode工具
-    
-    快速查看最近的记忆，无需搜索关键词
+    列出最近的旧历史档案工具。
     """
     
     def __init__(self, store: EpisodeStore):
@@ -224,9 +211,9 @@ class ListRecentEpisodesTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "列出最近的历史记忆。"
-            "当你想快速了解最近的对话内容，"
-            "或者用户问'最近做了什么'时使用。"
+            "列出最近的旧对话档案。"
+            "仅当用户明确要求查看最近的 episode、旧对话档案或历史记录时使用。"
+            "不要把它作为默认记忆或当前任务摘要来源。"
         )
     
     @property
@@ -268,9 +255,7 @@ class ListRecentEpisodesTool(Tool):
 
 class GetEpisodeStatsTool(Tool):
     """
-    获取Episode统计信息工具
-    
-    查看记忆系统的整体状态
+    获取旧历史档案统计信息工具。
     """
     
     def __init__(self, store: EpisodeStore):
@@ -283,8 +268,8 @@ class GetEpisodeStatsTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "获取历史记忆的统计信息。"
-            "查看总记忆数量、最后更新时间等。"
+            "获取旧对话档案(Episodes)的统计信息。"
+            "仅当用户明确询问 episode 档案状态、数量或历史档案统计时使用。"
         )
     
     @property

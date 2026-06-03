@@ -481,6 +481,12 @@ class TestSearchEpisodesTool:
         result = await tool.execute(query="nonexistent_xyz")
         assert "未找到" in result or "No episodes" in result.lower()
 
+    def test_description_marks_episodes_as_legacy_archive(self, tool):
+        """Episode 工具说明应避免把旧档案当默认记忆来源。"""
+        assert "legacy archive" in tool.description
+        assert "不是默认记忆来源" in tool.description
+        assert "明确要求" in tool.description
+
 
 class TestListRecentEpisodesTool:
     """Test ListRecentEpisodesTool."""
@@ -521,6 +527,11 @@ class TestListRecentEpisodesTool:
         result = await tool.execute(limit=2)
         assert result.count("Episode") <= 2
 
+    def test_description_requires_explicit_archive_request(self, tool):
+        """最近 episode 列表工具也应只用于明确查看旧档案。"""
+        assert "明确要求" in tool.description
+        assert "不要把它作为默认记忆" in tool.description
+
 
 class TestGetEpisodeStatsTool:
     """Test GetEpisodeStatsTool."""
@@ -554,3 +565,8 @@ class TestGetEpisodeStatsTool:
         """Execute returns episode statistics."""
         result = await tool.execute()
         assert "3" in result  # total count
+
+    def test_description_requires_explicit_stats_request(self, tool):
+        """统计工具只用于明确询问旧档案状态。"""
+        assert "明确询问" in tool.description
+        assert "旧对话档案" in tool.description

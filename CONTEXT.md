@@ -8,7 +8,7 @@ Redesign memory boundaries on the `memory-redesign-v1` branch.
 
 ## Active Step
 
-Step 4 completed: separate session compaction from long-term memory and episode archives.
+Step 5 completed: keep episode tools as legacy archive only.
 
 ## Completed Steps
 
@@ -27,10 +27,11 @@ Step 4 completed: separate session compaction from long-term memory and episode 
 - Changed token compaction to produce `session.metadata.running_summary`.
 - Stopped token compaction from writing MEMORY.md, HISTORY.md, or new episode files.
 - Added current session summary injection to LLM context.
+- Updated episode tool descriptions so they are only used for explicit old-history archive requests.
 
 ## Next Step
 
-- Step 5: keep episode tools as legacy archive only.
+- Step 6: update README.md and ARCHITECTURE.md, then run final regression tests.
 
 ## Blockers
 
@@ -47,6 +48,7 @@ Step 4 completed: separate session compaction from long-term memory and episode 
 - Automatic post-response extraction writes only MEMORY.md and never USER.md.
 - Invalid extraction JSON is skipped and the scan cursor advances to avoid repeated retries on the same messages.
 - Token compaction is for current-session continuity only; long-term memory extraction is handled separately after turns.
+- Episode tools remain registered for legacy archive lookup, but are not default memory or session-summary sources.
 
 ## Validation
 
@@ -63,6 +65,7 @@ Step 4 completed: separate session compaction from long-term memory and episode 
 - Step 4 compaction target tests: 69 passed.
 - Step 4 related regression tests: 35 passed.
 - Step 4 AST syntax check: passed.
+- Step 5 episode + context tests: 45 passed.
 
 ## Cautions
 
