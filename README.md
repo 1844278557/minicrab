@@ -1,118 +1,211 @@
 <div align="center">
   <img src="minicrab-logo.png" alt="minicrab" width="620" />
-  <p>一只帮你聊天、记事、查资料的小螃蟹。</p>
+  <p>聊天、记事、查资料，一个助手随时接上。</p>
 </div>
 
 # minicrab
 
-这是一个持续改进和使用的个人 AI 助手。平时用来聊天、整理资料、查询本地文档，也可以调用工具处理文件和设置提醒。
+minicrab 是支持命令行和微信的个人 AI 助手，提供连续对话、长期记忆、文档检索、工具调用和定时提醒。会话摘要与文件线索帮助长对话保持连续，用户偏好和工作信息分别保存，文档内容通过知识库检索参与回答。
 
-目前主要在完善记忆、长对话和工具权限这些实际使用中比较容易出问题的部分，不追求做成一个大而全的平台。
+## 功能
 
-## 能做什么
+| 功能 | 用途 |
+| --- | --- |
+| CLI 对话 | 交互聊天、单次提问，按会话名称保存不同主题。 |
+| 微信对话 | 扫码登录，在微信中收发文字、图片和文件。 |
+| 长期记忆 | 保存用户偏好和工作信息，支持记住、修正和忘记指定内容。 |
+| 文档检索 | 索引 PDF、Word、Markdown 等文档，围绕文档内容提问。 |
+| 工具调用 | 读写文件、执行命令、联网查询，通过 MCP 接入其他工具。 |
+| 定时提醒 | 创建提醒、查询任务，在对话渠道接收通知。 |
+| 权限确认 | 敏感操作执行前提供确认入口，支持单次授权和临时授权。 |
 
-- **聊天**：命令行和本地网页都能用，也保留了飞书、微信等渠道接入。
-- **记忆**：区分用户偏好、长期工作记忆和当前会话摘要，支持明确地记住、纠正和忘记。
-- **长对话**：压缩旧消息，保留近期内容、文件和技能线索，减少长任务中丢失上下文的情况。
-- **文档检索**：上传、索引并查询文档，支持本地嵌入模型和兼容的远程服务。
-- **工具与提醒**：文件操作、命令执行、联网查询、定时提醒和 MCP 扩展；主对话中的敏感操作会先请求确认。
+## 安装
 
-## 本地运行
-
-需要 Python 3.11 或以上。先从源码安装，当前版本没有发布到 PyPI。
+需要 Python 3.11 或以上和可访问的模型服务。
 
 ```bash
-git clone https://github.com/1844278557/minicrab.git
+git clone --branch memory-redesign-v1 https://github.com/1844278557/minicrab.git
 cd minicrab
-git switch memory-redesign-v1
 ```
 
-当前改进在 `memory-redesign-v1` 分支，尚未合并到 `main`。
-
-Windows PowerShell：
+### Windows PowerShell
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-python -m pip install -e .
+python -m pip install -e ".[weixin]"
 minicrab onboard
 ```
 
-macOS / Linux：
+如果 PowerShell 未启用脚本执行，可直接使用虚拟环境中的程序：
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -e ".[weixin]"
+.\.venv\Scripts\minicrab.exe onboard
+```
+
+### macOS / Linux
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install -e .
+python -m pip install -e ".[weixin]"
 minicrab onboard
 ```
 
-如果需要使用 WhatsApp 桥接，还需要 Node.js 20 或以上；命令行和网页聊天不需要。
+`onboard` 创建配置和工作区。再次运行时，输入 `N` 可保留现有设置并补齐配置字段；输入 `y` 会恢复默认设置。
 
-### 配置模型
+## 配置模型
 
-初始化会显示配置文件的位置。新环境默认使用 `~/.minicrab/config.json` 和 `~/.minicrab/workspace`。如果已有 `~/.nanobot/config.json` 且尚无新配置，会继续读取旧配置和数据，不需要手动搬动。
+默认配置文件：
 
-在生成的配置里填写自己的模型和 API Key。例如，使用兼容 OpenAI 接口的服务时，可以修改下面这些字段，其他已有配置保留：
+- Windows：`%USERPROFILE%\.minicrab\config.json`
+- macOS / Linux：`~/.minicrab/config.json`
+
+Windows 可直接打开：
+
+```powershell
+notepad "$env:USERPROFILE\.minicrab\config.json"
+```
+
+使用兼容 OpenAI 接口的模型服务时，在现有配置中填写以下字段，其他节点保持不变：
 
 ```json
 {
   "agents": {
     "defaults": {
       "provider": "custom",
-      "model": "你的模型名称"
+      "model": "填写模型名称",
+      "timezone": "Asia/Shanghai"
     }
   },
   "providers": {
     "custom": {
-      "apiKey": "你的 API Key",
-      "apiBase": "https://你的模型服务地址/v1"
+      "apiKey": "填写 API Key",
+      "apiBase": "https://api.example.com/v1"
     }
   }
 }
 ```
 
-配置好后：
+| 字段 | 填写内容 |
+| --- | --- |
+| `provider` | 使用兼容接口时填写 `custom`；也可填写已配置的服务名称，例如 `siliconflow`、`deepseek`。 |
+| `model` | 模型服务提供的模型标识，需与该服务控制台中的名称一致。 |
+| `timezone` | 对话时间和提醒使用的时区，例如 `Asia/Shanghai`。 |
+| `apiKey` | 对应模型服务的 API Key。 |
+| `apiBase` | 对应服务的接口根地址，替换示例中的 `https://api.example.com/v1`。 |
+
+配置完成后检查状态：
 
 ```bash
-minicrab agent
-minicrab agent -m "你好，介绍一下你能做什么"
 minicrab status
 ```
 
-### 浏览器聊天
+配置、会话、记忆和登录数据统一保存在用户目录下的 `.minicrab` 中，默认工作区为 `.minicrab/workspace`。
 
-在配置中启用 Web 渠道：
+## CLI 使用
+
+### 交互聊天
+
+```bash
+minicrab agent
+```
+
+出现 `You:` 后输入消息，回车发送。可连续提问，例如先说明任务，再补充文件位置或处理要求。输入 `exit` 或 `quit` 结束命令行聊天。
+
+### 单次提问
+
+```bash
+minicrab agent -m "列出当前工作区中的文件，并说明各自的用途"
+```
+
+### 按主题保存会话
+
+```bash
+minicrab agent --session cli:work
+minicrab agent --session cli:reading
+```
+
+再次使用同一个会话名称时，会接上该会话的历史。两个会话可以分别处理工作任务和阅读资料。
+
+### 常用对话命令
+
+| 输入 | 作用 |
+| --- | --- |
+| `/new` | 开始新的对话。 |
+| `/status` | 查看模型、会话和上下文状态。 |
+| `/help` | 查看可用命令。 |
+| `exit` 或 `quit` | 退出 CLI。 |
+
+需要查看工具执行过程时：
+
+```bash
+minicrab agent --logs
+```
+
+使用独立配置时：
+
+```bash
+minicrab agent --config ./config.local.json
+```
+
+## 微信使用
+
+### 1. 启用微信渠道
+
+安装命令中的 `.[weixin]` 包含二维码展示和微信媒体处理所需依赖。
+
+在配置文件的 `channels` 节点中启用 `weixin`，保留已填写的模型和其他配置：
 
 ```json
 {
   "channels": {
-    "web": {
+    "weixin": {
       "enabled": true,
-      "host": "127.0.0.1",
-      "port": 18790,
-      "streaming": true
+      "allowFrom": ["*"]
     }
   }
 }
 ```
 
-保留前面的模型配置，然后运行：
+`allowFrom` 是允许交互的用户列表，`["*"]` 表示允许接入用户；填写具体用户 ID 可限定使用范围。
+
+### 2. 扫码登录
+
+```bash
+minicrab channels login weixin
+```
+
+终端显示二维码或登录链接。使用微信扫码，并按页面提示完成确认。登录成功后，状态保存在 `.minicrab/weixin/account.json` 中。
+
+### 3. 启动消息接收
 
 ```bash
 minicrab gateway
 ```
 
-打开 [本地聊天页面](http://127.0.0.1:18790/web)。网页默认只监听本机，支持聊天记录、Markdown 和操作确认。可以让助手索引并检索本地文档。
+网关运行期间，微信消息会交给助手处理，回复会发回原对话。该终端需要保持运行，按 `Ctrl+C` 可关闭网关。
 
-如果想单独使用一套配置，可以通过 `--config` 指定文件，例如 `minicrab gateway --config ./config.local.json`。不要把包含 API Key 的配置提交到仓库。
+登录状态已保存时，可直接运行 `minicrab gateway`。
 
-## 其他使用方式
+### 4. 在微信中使用功能
 
-命令行也可以通过 `python -m minicrab` 启动。代码、插件入口和环境变量使用 `minicrab` / `MINICRAB_`，旧入口保留兼容。
+可以直接发送：
 
-Docker 也可以从当前源码构建：`docker build -t minicrab .`。容器运行仍需挂载自己的配置目录，不包含个人配置或聊天数据。
+- “记住：日常回复使用中文，代码说明尽量简洁。”
+- “明天下午三点提醒我整理会议记录。”
+- 发送文档后：“索引刚才的文件，提取其中的关键结论。”
+- “更正刚才的偏好：回复保留必要细节。”
 
-## 项目来源
+查看或停止当前任务时，可发送 `/status`、`/help` 或 `/stop`。
 
-minicrab 基于 [HKUDS/nanobot](https://github.com/HKUDS/nanobot) 开发，当前版本主要围绕记忆管理、会话压缩、权限确认、Web 聊天和文档检索继续改进。保留原项目的版权声明，许可证见 [LICENSE](LICENSE)。
+需要重新扫码时：
+
+```bash
+minicrab channels login weixin --force
+```
+
+## 许可证
+
+minicrab 采用 [MIT 许可证](LICENSE)。

@@ -170,10 +170,10 @@ class SkillsLoader:
         return content
 
     def _parse_minicrab_metadata(self, raw: str) -> dict:
-        """读取技能元数据，优先使用 minicrab 并兼容旧名称。"""
+        """读取 minicrab 技能元数据和通用技能格式。"""
         try:
             data = json.loads(raw)
-            return data.get("minicrab", data.get("nanobot", data.get("openclaw", {}))) if isinstance(data, dict) else {}
+            return data.get("minicrab", data.get("openclaw", {})) if isinstance(data, dict) else {}
         except (json.JSONDecodeError, TypeError):
             return {}
 

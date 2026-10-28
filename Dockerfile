@@ -16,13 +16,12 @@ WORKDIR /app
 
 # Install Python dependencies first (cached layer)
 COPY pyproject.toml README.md LICENSE minicrab-logo.png ./
-RUN mkdir -p minicrab nanobot bridge && touch minicrab/__init__.py nanobot/__init__.py && \
+RUN mkdir -p minicrab bridge && touch minicrab/__init__.py && \
     uv pip install --system --no-cache . && \
-    rm -rf minicrab nanobot bridge
+    rm -rf minicrab bridge
 
 # Copy the full source and install
 COPY minicrab/ minicrab/
-COPY nanobot/ nanobot/
 COPY bridge/ bridge/
 RUN uv pip install --system --no-cache .
 

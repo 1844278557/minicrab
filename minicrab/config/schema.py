@@ -5,7 +5,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
-from pydantic_settings import BaseSettings, EnvSettingsSource
+from pydantic_settings import BaseSettings
 
 from minicrab.config.defaults import get_default_workspace
 
@@ -304,11 +304,3 @@ class Config(BaseSettings):
         return None
 
     model_config = ConfigDict(env_prefix="MINICRAB_", env_nested_delimiter="__")
-
-    @classmethod
-    def settings_customise_sources(
-        cls, settings_cls, init_settings, env_settings, dotenv_settings, file_secret_settings,
-    ):
-        """优先读取 MINICRAB 环境变量，未指定的值继续兼容旧前缀。"""
-        legacy_env = EnvSettingsSource(settings_cls, env_prefix="NANOBOT_")
-        return init_settings, env_settings, legacy_env, dotenv_settings, file_secret_settings

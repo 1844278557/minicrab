@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from minicrab.config.defaults import APP_DATA_DIR, LEGACY_DATA_DIR, get_default_data_dir
+from minicrab.config.defaults import get_default_data_dir
 from minicrab.config.loader import get_config_path
 from minicrab.utils.helpers import ensure_dir
 
@@ -42,10 +42,10 @@ def get_workspace_path(workspace: str | None = None) -> Path:
 
 
 def is_default_workspace(workspace: str | Path | None) -> bool:
-    """识别新旧默认工作区，使已有定时任务等数据仍可恢复。"""
+    """判断工作区是否使用 minicrab 默认位置。"""
     current = Path(workspace).expanduser() if workspace is not None else get_default_data_dir() / "workspace"
-    defaults = [Path.home() / name / "workspace" for name in (APP_DATA_DIR, LEGACY_DATA_DIR)]
-    return any(current.resolve(strict=False) == path.resolve(strict=False) for path in defaults)
+    default = get_default_data_dir() / "workspace"
+    return current.resolve(strict=False) == default.resolve(strict=False)
 
 
 def get_cli_history_path() -> Path:
@@ -60,4 +60,4 @@ def get_bridge_install_dir() -> Path:
 
 def get_legacy_sessions_dir() -> Path:
     """Return the legacy global session directory used for migration fallback."""
-    return Path.home() / LEGACY_DATA_DIR / "sessions"
+    return get_default_data_dir() / "sessions"

@@ -1,10 +1,10 @@
-"""验证 minicrab 路径和旧配置的读取兼容，避免改名后丢失现有数据。"""
+"""验证 minicrab 的默认目录、指定配置和工作区解析。"""
 
 from pathlib import Path
 
 import pytest
 
-from minicrab.config.loader import get_config_path, load_config
+from minicrab.config.loader import get_config_path
 from minicrab.config.schema import Config
 
 from minicrab.config.paths import (
@@ -58,7 +58,7 @@ def test_media_dir_supports_channel_namespace(monkeypatch, tmp_path: Path) -> No
 def test_shared_and_legacy_paths_remain_global() -> None:
     assert get_cli_history_path() == Path.home() / ".minicrab" / "history" / "cli_history"
     assert get_bridge_install_dir() == Path.home() / ".minicrab" / "bridge"
-    assert get_legacy_sessions_dir() == Path.home() / ".nanobot" / "sessions"
+    assert get_legacy_sessions_dir() == Path.home() / ".minicrab" / "sessions"
 
 
 def test_workspace_path_is_explicitly_resolved() -> None:
@@ -69,7 +69,6 @@ def test_workspace_path_is_explicitly_resolved() -> None:
 def test_is_default_workspace_distinguishes_default_and_custom_paths() -> None:
     assert is_default_workspace(None) is True
     assert is_default_workspace(Path.home() / ".minicrab" / "workspace") is True
-    assert is_default_workspace(Path.home() / ".nanobot" / "workspace") is True
     assert is_default_workspace("~/custom-workspace") is False
 
 
@@ -77,29 +76,3 @@ def test_fresh_install_uses_minicrab_data():
     """新安装的配置、工作区和共享目录使用新名称。"""
     assert get_config_path() == Path.home() / ".minicrab" / "config.json"
     assert Config().agents.defaults.workspace == "~/.minicrab/workspace"
-
-
-def test_existing_config_preserves_legacy_workspace():
-    """没有新配置时继续读取旧配置，并保留其默认工作区。"""
-    legacy = Path.home() / ".nanobot" / "config.json"
-    legacy.parent.mkdir()
-    legacy.write_text('{"agents":{"defaults":{"model":"existing-model"}}}', encoding="utf-8")
-
-    assert get_config_path() == legacy
-    assert load_config().agents.defaults.model == "existing-model"
-    assert load_config().agents.defaults.workspace == "~/.nanobot/workspace"
-    assert get_workspace_path() == legacy.parent / "workspace"
-    assert get_cli_history_path() == legacy.parent / "history" / "cli_history"
-    assert get_bridge_install_dir() == legacy.parent / "bridge"
-
-
-def test_new_config_takes_priority_without_changing_legacy_file():
-    """两份配置并存时优先使用新配置，旧文件保持原样。"""
-    for name in (".nanobot", ".minicrab"):
-        directory = Path.home() / name
-        directory.mkdir()
-        (directory / "config.json").write_text("{}", encoding="utf-8")
-
-    assert get_config_path() == Path.home() / ".minicrab" / "config.json"
-    assert Config().agents.defaults.workspace == "~/.minicrab/workspace"
-    assert (Path.home() / ".nanobot" / "config.json").read_text(encoding="utf-8") == "{}"

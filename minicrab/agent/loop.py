@@ -174,8 +174,8 @@ class AgentLoop:
         self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
         self._background_tasks: list[asyncio.Task] = []
         self._session_locks: dict[str, asyncio.Lock] = {}
-        # 新环境变量优先，旧前缀继续兼容；小于等于 0 表示不限并发。
-        _max = int(os.environ.get("MINICRAB_MAX_CONCURRENT_REQUESTS", os.environ.get("NANOBOT_MAX_CONCURRENT_REQUESTS", "3")))
+        # 小于等于 0 表示不限并发。
+        _max = int(os.environ.get("MINICRAB_MAX_CONCURRENT_REQUESTS", "3"))
         self._concurrency_gate: asyncio.Semaphore | None = (
             asyncio.Semaphore(_max) if _max > 0 else None
         )

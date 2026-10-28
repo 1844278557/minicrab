@@ -42,16 +42,11 @@ def discover_plugins() -> dict[str, type[BaseChannel]]:
     from importlib.metadata import entry_points
 
     plugins: dict[str, type[BaseChannel]] = {}
-    # 兼容旧插件；同名时优先使用新入口，且不因重复入口再次加载。
-    for group in ("minicrab.channels", "nanobot.channels"):
-        for ep in entry_points(group=group):
-            if ep.name in plugins:
-                continue
-            try:
-                cls = ep.load()
-                plugins[ep.name] = cls
-            except Exception as e:
-                logger.warning("Failed to load channel plugin '{}': {}", ep.name, e)
+    for ep in entry_points(group="minicrab.channels"):
+        try:
+            plugins[ep.name] = ep.load()
+        except Exception as e:
+            logger.warning("Failed to load channel plugin '{}': {}", ep.name, e)
     return plugins
 
 

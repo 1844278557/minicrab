@@ -22,13 +22,9 @@ if (!globalThis.crypto) {
 import { BridgeServer } from './server.js';
 import { homedir } from 'os';
 import { join } from 'path';
-import { existsSync } from 'fs';
 
 const PORT = parseInt(process.env.BRIDGE_PORT || '3001', 10);
-// 新配置优先；已有旧配置时继续读取原来的登录数据。
-const dataDir = !existsSync(join(homedir(), '.minicrab', 'config.json')) && existsSync(join(homedir(), '.nanobot', 'config.json'))
-  ? '.nanobot' : '.minicrab';
-const AUTH_DIR = process.env.AUTH_DIR || join(homedir(), dataDir, 'whatsapp-auth');
+const AUTH_DIR = process.env.AUTH_DIR || join(homedir(), '.minicrab', 'whatsapp-auth');
 const TOKEN = process.env.BRIDGE_TOKEN || undefined;
 
 console.log('🦀 minicrab WhatsApp Bridge');

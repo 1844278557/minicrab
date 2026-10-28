@@ -11,7 +11,7 @@ Use tmux only when you need an interactive TTY. Prefer exec background mode for 
 ## Quickstart (isolated socket, exec tool)
 
 ```bash
-SOCKET_DIR="${MINICRAB_TMUX_SOCKET_DIR:-${NANOBOT_TMUX_SOCKET_DIR:-${TMPDIR:-/tmp}/minicrab-tmux-sockets}}"
+SOCKET_DIR="${MINICRAB_TMUX_SOCKET_DIR:-${TMPDIR:-/tmp}/minicrab-tmux-sockets}"
 mkdir -p "$SOCKET_DIR"
 SOCKET="$SOCKET_DIR/minicrab.sock"
 SESSION=minicrab-python
