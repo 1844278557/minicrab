@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from nanobot.agent.memory import MemoryStore
-from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
+from minicrab.agent.memory import MemoryStore
+from minicrab.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 
 
 def _make_messages(message_count: int = 30):
@@ -208,7 +208,7 @@ class TestSessionCompactionTypeHandling:
         async def _fake_sleep(delay: int) -> None:
             delays.append(delay)
 
-        monkeypatch.setattr("nanobot.providers.base.asyncio.sleep", _fake_sleep)
+        monkeypatch.setattr("minicrab.providers.base.asyncio.sleep", _fake_sleep)
 
         result = await store.consolidate(_make_messages(60), provider, "test-model")
 

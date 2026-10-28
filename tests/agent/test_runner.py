@@ -2,24 +2,25 @@
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from nanobot.providers.base import LLMResponse, ToolCallRequest
+from minicrab.providers.base import LLMResponse, ToolCallRequest
 
 
 def _make_loop(tmp_path):
-    from nanobot.agent.loop import AgentLoop
-    from nanobot.bus.queue import MessageBus
+    from minicrab.agent.loop import AgentLoop
+    from minicrab.bus.queue import MessageBus
 
     bus = MessageBus()
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
 
-    with patch("nanobot.agent.loop.ContextBuilder"), \
-         patch("nanobot.agent.loop.SessionManager"), \
-         patch("nanobot.agent.loop.SubagentManager") as MockSubMgr:
+    with patch("minicrab.agent.loop.ContextBuilder"), \
+         patch("minicrab.agent.loop.SessionManager"), \
+         patch("minicrab.agent.loop.SubagentManager") as MockSubMgr:
         MockSubMgr.return_value.cancel_by_session = AsyncMock(return_value=0)
         loop = AgentLoop(bus=bus, provider=provider, workspace=tmp_path)
     return loop
@@ -27,7 +28,7 @@ def _make_loop(tmp_path):
 
 @pytest.mark.asyncio
 async def test_runner_preserves_reasoning_fields_and_tool_results():
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from minicrab.agent.runner import AgentRunSpec, AgentRunner
 
     provider = MagicMock()
     captured_second_call: list[dict] = []
@@ -83,7 +84,7 @@ async def test_runner_preserves_reasoning_fields_and_tool_results():
 
 @pytest.mark.asyncio
 async def test_runner_summarizes_long_tool_result_without_tools():
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from minicrab.agent.runner import AgentRunSpec, AgentRunner
 
     provider = MagicMock()
     calls: list[dict] = []
@@ -134,7 +135,7 @@ async def test_runner_summarizes_long_tool_result_without_tools():
 
 @pytest.mark.asyncio
 async def test_runner_falls_back_when_tool_result_summary_fails():
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from minicrab.agent.runner import AgentRunSpec, AgentRunner
 
     provider = MagicMock()
     call_count = {"n": 0}
@@ -178,8 +179,8 @@ async def test_runner_falls_back_when_tool_result_summary_fails():
 
 @pytest.mark.asyncio
 async def test_runner_calls_hooks_in_order():
-    from nanobot.agent.hook import AgentHook, AgentHookContext
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from minicrab.agent.hook import AgentHook, AgentHookContext
+    from minicrab.agent.runner import AgentRunSpec, AgentRunner
 
     provider = MagicMock()
     call_count = {"n": 0}
@@ -253,8 +254,8 @@ async def test_runner_calls_hooks_in_order():
 
 @pytest.mark.asyncio
 async def test_runner_streaming_hook_receives_deltas_and_end_signal():
-    from nanobot.agent.hook import AgentHook, AgentHookContext
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from minicrab.agent.hook import AgentHook, AgentHookContext
+    from minicrab.agent.runner import AgentRunSpec, AgentRunner
 
     provider = MagicMock()
     streamed: list[str] = []
@@ -297,7 +298,7 @@ async def test_runner_streaming_hook_receives_deltas_and_end_signal():
 
 @pytest.mark.asyncio
 async def test_runner_returns_max_iterations_fallback():
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from minicrab.agent.runner import AgentRunSpec, AgentRunner
 
     provider = MagicMock()
     provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
@@ -325,7 +326,7 @@ async def test_runner_returns_max_iterations_fallback():
 
 @pytest.mark.asyncio
 async def test_runner_returns_structured_tool_error():
-    from nanobot.agent.runner import AgentRunSpec, AgentRunner
+    from minicrab.agent.runner import AgentRunSpec, AgentRunner
 
     provider = MagicMock()
     provider.chat_with_retry = AsyncMock(return_value=LLMResponse(
@@ -350,6 +351,91 @@ async def test_runner_returns_structured_tool_error():
     assert result.error == "Error: RuntimeError: boom"
     assert result.tool_events == [
         {"name": "list_dir", "status": "error", "detail": "boom"}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_runner_parallelizes_only_safe_tool_groups():
+    """只读工具并行执行，写入和消息类工具保持顺序。"""
+    from minicrab.agent.runner import AgentRunSpec, AgentRunner
+
+    provider = MagicMock()
+    call_count = {"n": 0}
+    final_messages: list[dict] = []
+
+    async def chat_with_retry(**kwargs):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            return LLMResponse(
+                content="working",
+                tool_calls=[
+                    ToolCallRequest(id="call_1", name="read_file", arguments={"path": "a.md"}),
+                    ToolCallRequest(id="call_2", name="list_dir", arguments={"path": "."}),
+                    ToolCallRequest(id="call_3", name="write_file", arguments={"path": "a.md", "content": "x"}),
+                    ToolCallRequest(id="call_4", name="search_rag", arguments={"query": "x"}),
+                    ToolCallRequest(id="call_5", name="list_rag_documents", arguments={}),
+                    ToolCallRequest(id="call_6", name="message", arguments={"content": "done"}),
+                ],
+            )
+        final_messages[:] = kwargs["messages"]
+        return LLMResponse(content="done", tool_calls=[], usage={})
+
+    provider.chat_with_retry = chat_with_retry
+    running: set[str] = set()
+    events: list[tuple[str, str, tuple[str, ...]]] = []
+    safe_overlap = {"seen": False}
+    unsafe_overlap = {"seen": False}
+
+    async def execute(name: str, arguments: dict):
+        running.add(name)
+        events.append(("start", name, tuple(sorted(running))))
+        if name in {"read_file", "list_dir"} and {"read_file", "list_dir"} <= running:
+            safe_overlap["seen"] = True
+        if name in {"write_file", "message"} and len(running) > 1:
+            unsafe_overlap["seen"] = True
+        await asyncio.sleep(0.01)
+        events.append(("finish", name, tuple(sorted(running))))
+        running.remove(name)
+        return f"{name} result"
+
+    tools = MagicMock()
+    tools.get_definitions.return_value = []
+    tools.execute = execute
+
+    runner = AgentRunner(provider)
+    result = await runner.run(AgentRunSpec(
+        initial_messages=[],
+        tools=tools,
+        model="test-model",
+        max_iterations=2,
+        concurrent_tools=True,
+    ))
+
+    assert result.final_content == "done"
+    assert safe_overlap["seen"] is True
+    assert unsafe_overlap["seen"] is False
+    write_start = next(
+        index for index, event in enumerate(events)
+        if event[0] == "start" and event[1] == "write_file"
+    )
+    read_finish = next(
+        index for index, event in enumerate(events)
+        if event[0] == "finish" and event[1] == "read_file"
+    )
+    list_finish = next(
+        index for index, event in enumerate(events)
+        if event[0] == "finish" and event[1] == "list_dir"
+    )
+    assert read_finish < write_start
+    assert list_finish < write_start
+    tool_messages = [message for message in final_messages if message.get("role") == "tool"]
+    assert [message["name"] for message in tool_messages] == [
+        "read_file",
+        "list_dir",
+        "write_file",
+        "search_rag",
+        "list_rag_documents",
+        "message",
     ]
 
 
@@ -404,8 +490,8 @@ async def test_loop_stream_filter_handles_think_only_prefix_without_crashing(tmp
 
 @pytest.mark.asyncio
 async def test_subagent_max_iterations_announces_existing_fallback(tmp_path, monkeypatch):
-    from nanobot.agent.subagent import SubagentManager
-    from nanobot.bus.queue import MessageBus
+    from minicrab.agent.subagent import SubagentManager
+    from minicrab.bus.queue import MessageBus
 
     bus = MessageBus()
     provider = MagicMock()
@@ -420,7 +506,7 @@ async def test_subagent_max_iterations_announces_existing_fallback(tmp_path, mon
     async def fake_execute(self, name, arguments):
         return "tool result"
 
-    monkeypatch.setattr("nanobot.agent.tools.registry.ToolRegistry.execute", fake_execute)
+    monkeypatch.setattr("minicrab.agent.tools.registry.ToolRegistry.execute", fake_execute)
 
     await mgr._run_subagent("sub-1", "do task", "label", {"channel": "test", "chat_id": "c1"})
 

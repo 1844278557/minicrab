@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from nanobot.agent.loop import AgentLoop
-from nanobot.bus.queue import MessageBus
-from nanobot.providers.base import GenerationSettings
+from minicrab.agent.loop import AgentLoop
+from minicrab.bus.queue import MessageBus
+from minicrab.providers.base import GenerationSettings
 
 
 def _make_loop(tmp_path) -> AgentLoop:

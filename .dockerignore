@@ -6,6 +6,13 @@ __pycache__
 dist/
 build/
 .git
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.ruff_tmp/
+memory/
+config.local.json
 .env
 .assets
 node_modules/

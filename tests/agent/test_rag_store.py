@@ -6,8 +6,10 @@ import json
 import sys
 from types import SimpleNamespace
 
-from nanobot.agent.rag.store import RAGStore
-from nanobot.agent.tools.rag import IndexDocumentTool
+import pytest
+
+from minicrab.agent.rag.store import RAGStore
+from minicrab.agent.tools.rag import IndexDocumentTool
 
 
 def test_default_embedding_uses_legacy_collection_and_registry(tmp_path) -> None:
@@ -35,6 +37,27 @@ def test_different_embedding_models_do_not_share_collection(tmp_path) -> None:
     assert qwen.registry_file != bge.registry_file
 
 
+def test_baai_embedding_model_uses_siliconflow_api(monkeypatch, tmp_path) -> None:
+    """BAAI 远程模型应该走 SiliconFlow embedding API，而不是本地模型加载。"""
+    class FakeEmbeddingFunction:
+        pass
+
+    monkeypatch.setitem(
+        sys.modules,
+        "chromadb",
+        SimpleNamespace(EmbeddingFunction=FakeEmbeddingFunction),
+    )
+    store = RAGStore(
+        tmp_path / "memory",
+        embedding_model="BAAI/bge-large-zh-v1.5",
+        embedding_api_key="test-key",
+    )
+
+    embedding_fn = store._create_embedding_function()
+
+    assert str(embedding_fn) == "SiliconFlowEmbeddingFunction(model=BAAI/bge-large-zh-v1.5)"
+
+
 def test_stats_exposes_active_collection_name(tmp_path) -> None:
     """状态信息里显示当前使用的 collection，便于排查索引问题。"""
     store = RAGStore(tmp_path / "memory", embedding_model="Qwen/Qwen3-Embedding-8B")
@@ -51,8 +74,9 @@ def test_ensure_collection_uses_model_specific_name(monkeypatch, tmp_path) -> No
     fake_collection = object()
 
     class FakeClient:
-        def __init__(self, path: str):
+        def __init__(self, path: str, settings=None):
             self.path = path
+            self.settings = settings
 
         def get_or_create_collection(self, **kwargs):
             calls.append(kwargs)
@@ -73,8 +97,9 @@ def test_ensure_collection_uses_model_specific_name(monkeypatch, tmp_path) -> No
 def test_ensure_collection_reports_legacy_chroma_config_error(monkeypatch, tmp_path) -> None:
     """旧 Chroma 配置缺少 _type 时，返回可理解的修复提示。"""
     class FakeClient:
-        def __init__(self, path: str):
+        def __init__(self, path: str, settings=None):
             self.path = path
+            self.settings = settings
 
         def get_or_create_collection(self, **_kwargs):
             raise KeyError("_type")
@@ -158,8 +183,9 @@ def test_clear_all_removes_every_rag_collection_and_registry(monkeypatch, tmp_pa
             return self._count
 
     class FakeClient:
-        def __init__(self, path: str):
+        def __init__(self, path: str, settings=None):
             self.path = path
+            self.settings = settings
 
         def list_collections(self):
             return [
@@ -185,3 +211,72 @@ def test_clear_all_removes_every_rag_collection_and_registry(monkeypatch, tmp_pa
     assert result["collections_removed"] == 2
     assert json.loads(legacy_registry.read_text(encoding="utf-8"))["documents"] == {}
     assert json.loads(current_registry.read_text(encoding="utf-8"))["documents"] == {}
+
+
+def test_chroma_client_disables_anonymized_telemetry(monkeypatch, tmp_path) -> None:
+    """创建 Chroma 客户端时显式关闭匿名遥测，减少 PostHog 噪声。"""
+    import chromadb
+
+    calls: list[object] = []
+
+    class FakeClient:
+        def __init__(self, path: str, settings=None):
+            self.path = path
+            calls.append(settings)
+
+    monkeypatch.setattr(chromadb, "PersistentClient", FakeClient)
+    store = RAGStore(tmp_path / "memory")
+
+    client = store._create_chroma_client()
+
+    assert isinstance(client, FakeClient)
+    assert calls
+    assert calls[0].anonymized_telemetry is False
+
+
+def test_siliconflow_embedding_http_error_is_readable(monkeypatch, tmp_path) -> None:
+    """远程 embedding HTTP 错误要转换成可读 RuntimeError。"""
+    import httpx
+
+    class FakeEmbeddingFunction:
+        pass
+
+    class FakeResponse:
+        status_code = 401
+        text = "bad api key"
+        request = httpx.Request("POST", "https://api.siliconflow.cn/v1/embeddings")
+
+        def raise_for_status(self) -> None:
+            raise httpx.HTTPStatusError("bad", request=self.request, response=self)
+
+        def json(self) -> dict:
+            return {}
+
+    class FakeClient:
+        def __init__(self, timeout: float):
+            self.timeout = timeout
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def post(self, *_args, **_kwargs):
+            return FakeResponse()
+
+    monkeypatch.setitem(
+        sys.modules,
+        "chromadb",
+        SimpleNamespace(EmbeddingFunction=FakeEmbeddingFunction),
+    )
+    monkeypatch.setattr(httpx, "Client", FakeClient)
+    store = RAGStore(
+        tmp_path / "memory",
+        embedding_model="BAAI/bge-large-zh-v1.5",
+        embedding_api_key="bad-key",
+    )
+    embedding_fn = store._create_siliconflow_embedding_function()
+
+    with pytest.raises(RuntimeError, match="SiliconFlow embedding request failed: HTTP 401"):
+        embedding_fn(["hello"])

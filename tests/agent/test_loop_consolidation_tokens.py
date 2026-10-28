@@ -2,14 +2,14 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from nanobot.agent.loop import AgentLoop
-import nanobot.agent.memory as memory_module
-from nanobot.bus.queue import MessageBus
-from nanobot.providers.base import LLMResponse
+from minicrab.agent.loop import AgentLoop
+import minicrab.agent.memory as memory_module
+from minicrab.bus.queue import MessageBus
+from minicrab.providers.base import LLMResponse
 
 
 def _make_loop(tmp_path, *, estimated_tokens: int, context_window_tokens: int) -> AgentLoop:
-    from nanobot.providers.base import GenerationSettings
+    from minicrab.providers.base import GenerationSettings
     provider = MagicMock()
     provider.get_default_model.return_value = "test-model"
     provider.generation = GenerationSettings(max_tokens=0)
@@ -27,12 +27,23 @@ def _make_loop(tmp_path, *, estimated_tokens: int, context_window_tokens: int) -
     )
     loop.tools.get_definitions = MagicMock(return_value=[])
     loop.memory_consolidator._SAFETY_BUFFER = 0
+    loop.memory_consolidator._RECENT_USER_TURNS_TO_KEEP = 0
     return loop
 
 
 @pytest.mark.asyncio
 async def test_prompt_below_threshold_does_not_consolidate(tmp_path) -> None:
     loop = _make_loop(tmp_path, estimated_tokens=100, context_window_tokens=200)
+    loop.memory_consolidator.consolidate_messages = AsyncMock(return_value=True)  # type: ignore[method-assign]
+
+    await loop.process_direct("hello", session_key="cli:test")
+
+    loop.memory_consolidator.consolidate_messages.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_prompt_below_80_percent_trigger_does_not_consolidate(tmp_path) -> None:
+    loop = _make_loop(tmp_path, estimated_tokens=150, context_window_tokens=200)
     loop.memory_consolidator.consolidate_messages = AsyncMock(return_value=True)  # type: ignore[method-assign]
 
     await loop.process_direct("hello", session_key="cli:test")
@@ -56,6 +67,34 @@ async def test_prompt_above_threshold_triggers_consolidation(tmp_path, monkeypat
     await loop.process_direct("hello", session_key="cli:test")
 
     assert loop.memory_consolidator.consolidate_messages.await_count >= 1
+
+
+@pytest.mark.asyncio
+async def test_consolidation_preserves_recent_user_turns(tmp_path, monkeypatch) -> None:
+    loop = _make_loop(tmp_path, estimated_tokens=1000, context_window_tokens=200)
+    loop.memory_consolidator._RECENT_USER_TURNS_TO_KEEP = 2
+    loop.memory_consolidator.consolidate_messages = AsyncMock(return_value="summary")  # type: ignore[method-assign]
+
+    session = loop.sessions.get_or_create("cli:test")
+    session.messages = [
+        {"role": "user", "content": "u1", "timestamp": "2026-01-01T00:00:00"},
+        {"role": "assistant", "content": "a1", "timestamp": "2026-01-01T00:00:01"},
+        {"role": "user", "content": "u2", "timestamp": "2026-01-01T00:00:02"},
+        {"role": "assistant", "content": "a2", "timestamp": "2026-01-01T00:00:03"},
+        {"role": "user", "content": "u3", "timestamp": "2026-01-01T00:00:04"},
+        {"role": "assistant", "content": "a3", "timestamp": "2026-01-01T00:00:05"},
+        {"role": "user", "content": "u4", "timestamp": "2026-01-01T00:00:06"},
+        {"role": "assistant", "content": "a4", "timestamp": "2026-01-01T00:00:07"},
+        {"role": "user", "content": "u5", "timestamp": "2026-01-01T00:00:08"},
+    ]
+    loop.sessions.save(session)
+    monkeypatch.setattr(memory_module, "estimate_message_tokens", lambda _m: 100)
+
+    await loop.memory_consolidator.maybe_consolidate_by_tokens(session)
+
+    archived_chunk = loop.memory_consolidator.consolidate_messages.await_args.args[0]
+    assert [message["content"] for message in archived_chunk] == ["u1", "a1", "u2", "a2", "u3", "a3"]
+    assert session.get_history(max_messages=0)[0]["content"] == "u4"
 
 
 @pytest.mark.asyncio

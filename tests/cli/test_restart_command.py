@@ -10,14 +10,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from nanobot.bus.events import InboundMessage
-from nanobot.providers.base import LLMResponse
+from minicrab.bus.events import InboundMessage
+from minicrab.providers.base import LLMResponse
 
 
 def _make_loop():
     """Create a minimal AgentLoop with mocked dependencies."""
-    from nanobot.agent.loop import AgentLoop
-    from nanobot.bus.queue import MessageBus
+    from minicrab.agent.loop import AgentLoop
+    from minicrab.bus.queue import MessageBus
 
     bus = MessageBus()
     provider = MagicMock()
@@ -25,9 +25,9 @@ def _make_loop():
     tmpdir = tempfile.TemporaryDirectory()
     workspace = Path(tmpdir.name)
 
-    with patch("nanobot.agent.loop.ContextBuilder"), \
-         patch("nanobot.agent.loop.SessionManager"), \
-         patch("nanobot.agent.loop.SubagentManager"):
+    with patch("minicrab.agent.loop.ContextBuilder"), \
+         patch("minicrab.agent.loop.SessionManager"), \
+         patch("minicrab.agent.loop.SubagentManager"):
         loop = AgentLoop(bus=bus, provider=provider, workspace=workspace)
     loop._test_tmpdir = tmpdir
     return loop, bus
@@ -37,14 +37,14 @@ class TestRestartCommand:
 
     @pytest.mark.asyncio
     async def test_restart_sends_message_and_calls_execv(self):
-        from nanobot.command.builtin import cmd_restart
-        from nanobot.command.router import CommandContext
+        from minicrab.command.builtin import cmd_restart
+        from minicrab.command.router import CommandContext
 
         loop, bus = _make_loop()
         msg = InboundMessage(channel="cli", sender_id="user", chat_id="direct", content="/restart")
         ctx = CommandContext(msg=msg, session=None, key=msg.session_key, raw="/restart", loop=loop)
 
-        with patch("nanobot.command.builtin.os.execv") as mock_execv:
+        with patch("minicrab.command.builtin.os.execv") as mock_execv:
             out = await cmd_restart(ctx)
             assert "Restarting" in out.content
 
@@ -58,7 +58,7 @@ class TestRestartCommand:
         msg = InboundMessage(channel="telegram", sender_id="u1", chat_id="c1", content="/restart")
 
         with patch.object(loop, "_dispatch", new_callable=AsyncMock) as mock_dispatch, \
-             patch("nanobot.command.builtin.os.execv"):
+             patch("minicrab.command.builtin.os.execv"):
             await bus.publish_inbound(msg)
 
             loop._running = True
@@ -96,7 +96,7 @@ class TestRestartCommand:
 
             mock_dispatch.assert_not_called()
             out = await asyncio.wait_for(bus.consume_outbound(), timeout=1.0)
-            assert "nanobot" in out.content.lower() or "Model" in out.content
+            assert "minicrab" in out.content.lower() or "Model" in out.content
 
     @pytest.mark.asyncio
     async def test_run_propagates_external_cancellation(self):

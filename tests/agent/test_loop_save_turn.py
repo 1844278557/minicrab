@@ -2,9 +2,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from nanobot.agent.context import ContextBuilder
-from nanobot.agent.loop import AgentLoop
-from nanobot.session.manager import Session
+from minicrab.agent.context import ContextBuilder
+from minicrab.agent.loop import AgentLoop
+from minicrab.session.manager import Session
 
 
 def _mk_loop() -> AgentLoop:

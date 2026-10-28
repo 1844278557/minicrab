@@ -7,7 +7,7 @@ from importlib.resources import files as pkg_files
 from pathlib import Path
 import datetime as datetime_module
 
-from nanobot.agent.context import ContextBuilder
+from minicrab.agent.context import ContextBuilder
 
 
 class _FakeDatetime(real_datetime):
@@ -25,7 +25,7 @@ def _make_workspace(tmp_path: Path) -> Path:
 
 
 def test_bootstrap_files_are_backed_by_templates() -> None:
-    template_dir = pkg_files("nanobot") / "templates"
+    template_dir = pkg_files("minicrab") / "templates"
 
     for filename in ContextBuilder.BOOTSTRAP_FILES:
         assert (template_dir / filename).is_file(), f"missing bootstrap template: {filename}"
@@ -33,7 +33,7 @@ def test_bootstrap_files_are_backed_by_templates() -> None:
 
 def test_context_template_uses_structured_task_state() -> None:
     """CONTEXT.md 模板应保留稳定任务状态字段。"""
-    template_dir = pkg_files("nanobot") / "templates"
+    template_dir = pkg_files("minicrab") / "templates"
     content = (template_dir / "CONTEXT.md").read_text(encoding="utf-8")
 
     for heading in (
@@ -140,6 +140,22 @@ def test_session_summary_is_loaded_into_system_message(tmp_path) -> None:
     system_content = messages[0]["content"]
     assert "# Current Session Summary" in system_content
     assert "Older context: user already chose Web modal approval." in system_content
+
+
+def test_session_harness_state_is_loaded_into_system_message(tmp_path) -> None:
+    """会话框架状态应进入系统消息，帮助压缩后恢复上下文。"""
+    workspace = _make_workspace(tmp_path)
+    builder = ContextBuilder(workspace)
+
+    messages = builder.build_messages(
+        history=[],
+        current_message="continue",
+        harness_state="# Session Harness State\n\n## Recent Files\n- src/main.py",
+    )
+
+    system_content = messages[0]["content"]
+    assert "# Session Harness State" in system_content
+    assert "- src/main.py" in system_content
 
 
 def test_history_is_trimmed_by_context_budget(tmp_path, monkeypatch) -> None:

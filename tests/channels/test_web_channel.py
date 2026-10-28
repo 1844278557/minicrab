@@ -7,11 +7,11 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
-from nanobot.bus.events import OutboundMessage
-from nanobot.bus.queue import MessageBus
-from nanobot.channels.manager import ChannelManager
-from nanobot.channels.web import WebChannel, WebConfig
-from nanobot.config.schema import ChannelsConfig
+from minicrab.bus.events import OutboundMessage
+from minicrab.bus.queue import MessageBus
+from minicrab.channels.manager import ChannelManager
+from minicrab.channels.web import WebChannel, WebConfig
+from minicrab.config.schema import ChannelsConfig
 
 
 def test_web_channel_default_config_is_disabled() -> None:
@@ -44,7 +44,7 @@ def test_channel_manager_loads_web_channel_from_config() -> None:
         providers=SimpleNamespace(groq=SimpleNamespace(api_key="")),
     )
 
-    with patch("nanobot.channels.registry.discover_all", return_value={"web": WebChannel}):
+    with patch("minicrab.channels.registry.discover_all", return_value={"web": WebChannel}):
         manager = ChannelManager.__new__(ChannelManager)
         manager.config = fake_config
         manager.bus = MessageBus()
@@ -64,7 +64,28 @@ def test_web_page_is_served() -> None:
     response = client.get("/web")
 
     assert response.status_code == 200
-    assert "Nanobot Web" in response.text
+    assert "minicrab" in response.text
+    assert "/web/assets/minicrab-icon.png" in response.text
+    icon = client.get("/web/assets/minicrab-icon.png")
+    assert icon.status_code == 200
+    assert icon.headers["content-type"] == "image/png"
+    assert icon.content.startswith(b"\x89PNG\r\n\x1a\n")
+
+
+def test_web_assets_include_markdown_rendering() -> None:
+    """Web 前端资源包含本地 Markdown 格式化渲染逻辑。"""
+    channel = WebChannel({"enabled": True, "allowFrom": ["*"]}, MessageBus())
+    client = TestClient(channel.app)
+
+    script = client.get("/web/assets/app.js")
+    style = client.get("/web/assets/style.css")
+
+    assert script.status_code == 200
+    assert "function renderMarkdown" in script.text
+    assert "function escapeHtml" in script.text
+    assert "text.innerHTML = renderMarkdown(content)" in script.text
+    assert style.status_code == 200
+    assert ".message-content pre" in style.text
 
 
 def test_websocket_message_publishes_inbound_message() -> None:
@@ -116,6 +137,31 @@ def test_websocket_approval_response_publishes_text_confirmation() -> None:
     assert inbound is not None
     assert inbound.channel == "web"
     assert inbound.content == "同意 A-test"
+    assert inbound.metadata["_approval_response"] is True
+
+
+def test_websocket_temporary_approval_response_publishes_text_confirmation() -> None:
+    """浏览器 30 分钟允许会转成文字确认。"""
+    bus = MessageBus()
+    channel = WebChannel({"enabled": True, "allowFrom": ["*"]}, bus)
+    client = TestClient(channel.app)
+
+    with client.websocket_connect("/web/ws") as socket:
+        assert socket.receive_json() == {"type": "status", "content": "connected"}
+        socket.send_json({"type": "approval_response", "decision": "approved_temporary", "id": "A-test"})
+        assert socket.receive_json() == {"type": "status", "content": "processing"}
+
+        inbound = None
+        for _ in range(20):
+            try:
+                inbound = bus.inbound.get_nowait()
+                break
+            except Exception:
+                time.sleep(0.01)
+
+    assert inbound is not None
+    assert inbound.channel == "web"
+    assert inbound.content == "确认30分钟 A-test"
     assert inbound.metadata["_approval_response"] is True
 
 

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from nanobot.agent.approval import ApprovalManager
+from minicrab.agent.approval import ApprovalManager
 
 
 def test_single_approval_prompt_hides_internal_id(tmp_path) -> None:
@@ -14,12 +14,12 @@ def test_single_approval_prompt_hides_internal_id(tmp_path) -> None:
         channel="weixin",
         chat_id="user",
         tool_name="remember_user_info",
-        arguments={"content": "# User Profile\n\n- 使用 Python。"},
+        arguments={"content": "# Working Memory\n\n- Web 审批用弹窗。", "target": "memory"},
     )
 
     assert event is not None
     content = event["content"]
-    assert "要我更新长期用户记忆吗？" in content
+    assert "要我更新长期工作记忆吗？" in content
     assert "回复“确认”继续" in content
     assert "A-" not in content
     assert "编号" not in content
@@ -54,7 +54,7 @@ def test_multiple_approval_prompt_uses_numbered_choices(tmp_path) -> None:
         channel="weixin",
         chat_id="user",
         tool_name="remember_user_info",
-        arguments={"content": "# User Profile\n\n- 使用 Python。"},
+        arguments={"content": "# Working Memory\n\n- Web 审批用弹窗。", "target": "memory"},
     )
     second = manager.request(
         session_key="weixin:user",
@@ -66,7 +66,7 @@ def test_multiple_approval_prompt_uses_numbered_choices(tmp_path) -> None:
 
     assert first is not None
     assert second is not None
-    assert "1. 更新长期用户记忆" in second["content"]
+    assert "1. 更新长期工作记忆" in second["content"]
     assert "2. 清空知识库" in second["content"]
     assert "确认 1" in second["content"]
     assert "A-" not in second["content"]
@@ -95,3 +95,46 @@ def test_legacy_confirm_with_internal_id_still_works(tmp_path) -> None:
 
     assert resolution is not None
     assert resolution.status == "approved"
+
+
+def test_temporary_confirm_adds_30_minute_grant(tmp_path) -> None:
+    """确认30分钟会让同会话同类操作临时放行。"""
+    manager = ApprovalManager(tmp_path)
+    event = manager.request(
+        session_key="weixin:user",
+        channel="weixin",
+        chat_id="user",
+        tool_name="exec",
+        arguments={"command": "git push"},
+    )
+
+    resolution = manager.consume_response("weixin:user", "确认30分钟")
+    second = manager.request(
+        session_key="weixin:user",
+        channel="weixin",
+        chat_id="user",
+        tool_name="exec",
+        arguments={"command": "git push origin main"},
+    )
+
+    assert event is not None
+    assert resolution is not None
+    assert resolution.status == "approved_temporary"
+    assert second is None
+
+
+def test_denied_permission_returns_denied_event(tmp_path) -> None:
+    """被禁止的操作不进入人工确认。"""
+    manager = ApprovalManager(tmp_path)
+
+    event = manager.request(
+        session_key="web:default",
+        channel="web",
+        chat_id="default",
+        tool_name="exec",
+        arguments={"command": "format C:"},
+    )
+
+    assert event is not None
+    assert event["status"] == "denied"
+    assert event["approval_id"] == ""

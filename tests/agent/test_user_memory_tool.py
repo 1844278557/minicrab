@@ -6,11 +6,85 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from nanobot.agent.context import ContextBuilder
-from nanobot.agent.loop import AgentLoop
-from nanobot.agent.tools.memory import RememberUserInfoTool
-from nanobot.bus.queue import MessageBus
-from nanobot.providers.base import GenerationSettings
+from minicrab.agent.context import ContextBuilder
+from minicrab.agent.loop import AgentLoop
+from minicrab.agent.tools.memory import ManageMemoryTool, RememberUserInfoTool
+from minicrab.bus.queue import MessageBus
+from minicrab.providers.base import GenerationSettings
+
+
+@pytest.mark.asyncio
+async def test_manage_memory_appends_user_memory(tmp_path) -> None:
+    """manage_memory 可以向 USER.md 追加单条用户记忆。"""
+    tool = ManageMemoryTool(workspace=tmp_path)
+
+    result = await tool.execute(
+        target="user",
+        op="append",
+        section="Preferences",
+        content="- Prefer concise Chinese replies.",
+        reason="用户明确要求",
+    )
+
+    assert result.startswith("USER.md updated.")
+    assert "Prefer concise Chinese replies" in (tmp_path / "USER.md").read_text(encoding="utf-8")
+
+
+@pytest.mark.asyncio
+async def test_manage_memory_replaces_memory_bullet(tmp_path) -> None:
+    """manage_memory 只替换精确匹配的一条工作记忆。"""
+    memory_file = tmp_path / "memory" / "MEMORY.md"
+    memory_file.parent.mkdir(parents=True)
+    memory_file.write_text(
+        "# Working Memory\n\n## Project Decisions\n\n"
+        "- [decision][2026-06-01] USER.md writes require approval.\n",
+        encoding="utf-8",
+    )
+    tool = ManageMemoryTool(workspace=tmp_path)
+
+    result = await tool.execute(
+        target="memory",
+        op="replace",
+        match="- [decision][2026-06-01] USER.md writes require approval.",
+        content="- [decision][2026-06-04] USER.md writes do not require approval.",
+    )
+
+    text = memory_file.read_text(encoding="utf-8")
+    assert result.startswith("MEMORY.md updated.")
+    assert "- [decision][2026-06-01] USER.md writes require approval." not in text
+    assert "- [decision][2026-06-04] USER.md writes do not require approval." in text
+
+
+@pytest.mark.asyncio
+async def test_manage_memory_deletes_exact_bullet(tmp_path) -> None:
+    """manage_memory 可以删除精确匹配的一条记忆。"""
+    user_file = tmp_path / "USER.md"
+    user_file.write_text("# User Memory\n\n## Preferences\n\n- Uses Python.\n", encoding="utf-8")
+    tool = ManageMemoryTool(workspace=tmp_path)
+
+    result = await tool.execute(target="user", op="delete", match="- Uses Python.")
+
+    assert result.startswith("USER.md updated.")
+    assert "Uses Python" not in user_file.read_text(encoding="utf-8")
+
+
+@pytest.mark.asyncio
+async def test_manage_memory_skips_replace_when_match_missing(tmp_path) -> None:
+    """replace/delete 找不到精确条目时不修改文件。"""
+    user_file = tmp_path / "USER.md"
+    original = "# User Memory\n\n## Preferences\n\n- Uses Python.\n"
+    user_file.write_text(original, encoding="utf-8")
+    tool = ManageMemoryTool(workspace=tmp_path)
+
+    result = await tool.execute(
+        target="user",
+        op="replace",
+        match="- Uses Java.",
+        content="- Uses Python.",
+    )
+
+    assert result == "No exact matching memory found."
+    assert user_file.read_text(encoding="utf-8") == original
 
 
 @pytest.mark.asyncio
@@ -101,6 +175,9 @@ def test_agent_loop_registers_remember_user_info_tool(tmp_path) -> None:
     )
 
     assert loop.tools.has("remember_user_info")
+    assert loop.tools.has("manage_memory")
+    manage_schema = loop.tools.get("manage_memory").to_schema()
+    assert manage_schema["function"]["parameters"]["required"] == ["target", "op"]
     schema = loop.tools.get("remember_user_info").to_schema()
     assert schema["function"]["parameters"]["required"] == ["content"]
     assert schema["function"]["parameters"]["properties"]["target"]["enum"] == ["user", "memory"]
@@ -115,5 +192,6 @@ def test_remember_user_info_schema_explains_memory_routing(tmp_path) -> None:
     assert "Use target='user'" in description
     assert "Use target='memory'" in description
     assert "business rules" in description
+    assert "[rule|decision|lesson|info][YYYY-MM-DD]" in description
     assert "raw tool output" in description
     assert "document contents" in description

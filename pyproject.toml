@@ -1,12 +1,12 @@
 [project]
-name = "nanobot-ai"
-version = "0.1.4.post6"
-description = "A lightweight personal AI assistant framework"
+name = "minicrab"
+version = "0.1.0"
+description = "A personal AI assistant with memory, document search, and a local web chat"
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.11"
 license = {text = "MIT"}
 authors = [
-    {name = "nanobot contributors"}
+    {name = "minicrab contributors"}
 ]
 keywords = ["ai", "agent", "chatbot"]
 classifiers = [
@@ -89,7 +89,8 @@ dev = [
 ]
 
 [project.scripts]
-nanobot = "nanobot.cli.commands:app"
+minicrab = "minicrab.cli.commands:app"
+nanobot = "minicrab.cli.commands:app"
 
 [build-system]
 requires = ["hatchling"]
@@ -100,29 +101,33 @@ allow-direct-references = true
 
 [tool.hatch.build]
 include = [
+    "minicrab/**/*.py",
     "nanobot/**/*.py",
-    "nanobot/templates/**/*.html",
-    "nanobot/templates/**/*.css",
-    "nanobot/templates/**/*.js",
-    "nanobot/templates/**/*.md",
-    "nanobot/skills/**/*.md",
-    "nanobot/skills/**/*.sh",
+    "minicrab/templates/**/*.html",
+    "minicrab/templates/**/*.css",
+    "minicrab/templates/**/*.js",
+    "minicrab/templates/**/*.png",
+    "minicrab/templates/**/*.md",
+    "minicrab/skills/**/*.md",
+    "minicrab/skills/**/*.sh",
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["nanobot"]
+packages = ["minicrab", "nanobot"]
 
 [tool.hatch.build.targets.wheel.sources]
-"nanobot" = "nanobot"
+"minicrab" = "minicrab"
 
 [tool.hatch.build.targets.wheel.force-include]
-"bridge" = "nanobot/bridge"
+"bridge" = "minicrab/bridge"
 
 [tool.hatch.build.targets.sdist]
 include = [
+    "minicrab/",
     "nanobot/",
     "bridge/",
     "README.md",
+    "minicrab-logo.png",
     "LICENSE",
 ]
 
@@ -139,7 +144,7 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 
 [tool.coverage.run]
-source = ["nanobot"]
+source = ["minicrab"]
 omit = ["tests/*", "**/tests/*"]
 
 [tool.coverage.report]

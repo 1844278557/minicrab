@@ -1,10 +1,10 @@
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from nanobot.agent.loop import AgentLoop
-from nanobot.agent.tools.cron import CronTool
-from nanobot.bus.queue import MessageBus
-from nanobot.cron.service import CronService
+from minicrab.agent.loop import AgentLoop
+from minicrab.agent.tools.cron import CronTool
+from minicrab.bus.queue import MessageBus
+from minicrab.cron.service import CronService
 
 
 def test_agent_loop_registers_cron_tool_with_configured_timezone(tmp_path: Path) -> None:

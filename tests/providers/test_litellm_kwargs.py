@@ -13,8 +13,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from nanobot.providers.openai_compat_provider import OpenAICompatProvider
-from nanobot.providers.registry import find_by_name
+from minicrab.providers.openai_compat_provider import OpenAICompatProvider
+from minicrab.providers.registry import find_by_name
 
 
 def _fake_chat_response(content: str = "ok") -> SimpleNamespace:
@@ -62,7 +62,7 @@ def test_openrouter_spec_is_gateway() -> None:
 
 def test_openrouter_sets_default_attribution_headers() -> None:
     spec = find_by_name("openrouter")
-    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI") as MockClient:
+    with patch("minicrab.providers.openai_compat_provider.AsyncOpenAI") as MockClient:
         OpenAICompatProvider(
             api_key="sk-or-test-key",
             api_base="https://openrouter.ai/api/v1",
@@ -71,30 +71,30 @@ def test_openrouter_sets_default_attribution_headers() -> None:
         )
 
     headers = MockClient.call_args.kwargs["default_headers"]
-    assert headers["HTTP-Referer"] == "https://github.com/HKUDS/nanobot"
-    assert headers["X-OpenRouter-Title"] == "nanobot"
+    assert headers["HTTP-Referer"] == "https://github.com/1844278557/minicrab"
+    assert headers["X-OpenRouter-Title"] == "minicrab"
     assert headers["X-OpenRouter-Categories"] == "cli-agent,personal-agent"
     assert "x-session-affinity" in headers
 
 
 def test_openrouter_user_headers_override_default_attribution() -> None:
     spec = find_by_name("openrouter")
-    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI") as MockClient:
+    with patch("minicrab.providers.openai_compat_provider.AsyncOpenAI") as MockClient:
         OpenAICompatProvider(
             api_key="sk-or-test-key",
             api_base="https://openrouter.ai/api/v1",
             default_model="anthropic/claude-sonnet-4-5",
             extra_headers={
-                "HTTP-Referer": "https://nanobot.ai",
-                "X-OpenRouter-Title": "Nanobot Pro",
+                "HTTP-Referer": "https://minicrab.ai",
+                "X-OpenRouter-Title": "Minicrab Pro",
                 "X-Custom-App": "enabled",
             },
             spec=spec,
         )
 
     headers = MockClient.call_args.kwargs["default_headers"]
-    assert headers["HTTP-Referer"] == "https://nanobot.ai"
-    assert headers["X-OpenRouter-Title"] == "Nanobot Pro"
+    assert headers["HTTP-Referer"] == "https://minicrab.ai"
+    assert headers["X-OpenRouter-Title"] == "Minicrab Pro"
     assert headers["X-OpenRouter-Categories"] == "cli-agent,personal-agent"
     assert headers["X-Custom-App"] == "enabled"
 
@@ -105,7 +105,7 @@ async def test_openrouter_keeps_model_name_intact() -> None:
     mock_create = AsyncMock(return_value=_fake_chat_response())
     spec = find_by_name("openrouter")
 
-    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI") as MockClient:
+    with patch("minicrab.providers.openai_compat_provider.AsyncOpenAI") as MockClient:
         client_instance = MockClient.return_value
         client_instance.chat.completions.create = mock_create
 
@@ -130,7 +130,7 @@ async def test_aihubmix_strips_model_prefix() -> None:
     mock_create = AsyncMock(return_value=_fake_chat_response())
     spec = find_by_name("aihubmix")
 
-    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI") as MockClient:
+    with patch("minicrab.providers.openai_compat_provider.AsyncOpenAI") as MockClient:
         client_instance = MockClient.return_value
         client_instance.chat.completions.create = mock_create
 
@@ -155,7 +155,7 @@ async def test_standard_provider_passes_model_through() -> None:
     mock_create = AsyncMock(return_value=_fake_chat_response())
     spec = find_by_name("deepseek")
 
-    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI") as MockClient:
+    with patch("minicrab.providers.openai_compat_provider.AsyncOpenAI") as MockClient:
         client_instance = MockClient.return_value
         client_instance.chat.completions.create = mock_create
 
@@ -174,12 +174,37 @@ async def test_standard_provider_passes_model_through() -> None:
 
 
 @pytest.mark.asyncio
+async def test_openai_compat_passes_response_format() -> None:
+    """OpenAI-compatible providers pass strict JSON response format through."""
+    mock_create = AsyncMock(return_value=_fake_chat_response())
+    spec = find_by_name("siliconflow")
+
+    with patch("minicrab.providers.openai_compat_provider.AsyncOpenAI") as MockClient:
+        client_instance = MockClient.return_value
+        client_instance.chat.completions.create = mock_create
+
+        provider = OpenAICompatProvider(
+            api_key="sk-test-key",
+            default_model="zai-org/GLM-4.6",
+            spec=spec,
+        )
+        await provider.chat(
+            messages=[{"role": "user", "content": "hello"}],
+            model="zai-org/GLM-4.6",
+            response_format={"type": "json_object"},
+        )
+
+    call_kwargs = mock_create.call_args.kwargs
+    assert call_kwargs["response_format"] == {"type": "json_object"}
+
+
+@pytest.mark.asyncio
 async def test_openai_compat_preserves_extra_content_on_tool_calls() -> None:
     """Gemini extra_content (thought signatures) must survive parse→serialize round-trip."""
     mock_create = AsyncMock(return_value=_fake_tool_call_response())
     spec = find_by_name("gemini")
 
-    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI") as MockClient:
+    with patch("minicrab.providers.openai_compat_provider.AsyncOpenAI") as MockClient:
         client_instance = MockClient.return_value
         client_instance.chat.completions.create = mock_create
 
@@ -207,7 +232,7 @@ async def test_openai_compat_preserves_extra_content_on_tool_calls() -> None:
 def test_openai_model_passthrough() -> None:
     """OpenAI models pass through unchanged."""
     spec = find_by_name("openai")
-    with patch("nanobot.providers.openai_compat_provider.AsyncOpenAI"):
+    with patch("minicrab.providers.openai_compat_provider.AsyncOpenAI"):
         provider = OpenAICompatProvider(
             api_key="sk-test-key",
             default_model="gpt-4o",

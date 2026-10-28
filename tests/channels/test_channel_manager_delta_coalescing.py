@@ -4,11 +4,11 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from nanobot.bus.events import OutboundMessage
-from nanobot.bus.queue import MessageBus
-from nanobot.channels.base import BaseChannel
-from nanobot.channels.manager import ChannelManager
-from nanobot.config.schema import Config
+from minicrab.bus.events import OutboundMessage
+from minicrab.bus.queue import MessageBus
+from minicrab.channels.base import BaseChannel
+from minicrab.channels.manager import ChannelManager
+from minicrab.config.schema import Config
 
 
 class MockChannel(BaseChannel):

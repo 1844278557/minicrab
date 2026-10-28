@@ -15,12 +15,13 @@ RUN apt-get update && \
 WORKDIR /app
 
 # Install Python dependencies first (cached layer)
-COPY pyproject.toml README.md LICENSE ./
-RUN mkdir -p nanobot bridge && touch nanobot/__init__.py && \
+COPY pyproject.toml README.md LICENSE minicrab-logo.png ./
+RUN mkdir -p minicrab nanobot bridge && touch minicrab/__init__.py nanobot/__init__.py && \
     uv pip install --system --no-cache . && \
-    rm -rf nanobot bridge
+    rm -rf minicrab nanobot bridge
 
 # Copy the full source and install
+COPY minicrab/ minicrab/
 COPY nanobot/ nanobot/
 COPY bridge/ bridge/
 RUN uv pip install --system --no-cache .
@@ -33,10 +34,10 @@ RUN npm install && npm run build
 WORKDIR /app
 
 # Create config directory
-RUN mkdir -p /root/.nanobot
+RUN mkdir -p /root/.minicrab
 
 # Gateway default port
 EXPOSE 18790
 
-ENTRYPOINT ["nanobot"]
+ENTRYPOINT ["minicrab"]
 CMD ["status"]

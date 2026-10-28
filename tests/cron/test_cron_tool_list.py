@@ -2,9 +2,9 @@
 
 from datetime import datetime, timezone
 
-from nanobot.agent.tools.cron import CronTool
-from nanobot.cron.service import CronService
-from nanobot.cron.types import CronJobState, CronSchedule
+from minicrab.agent.tools.cron import CronTool
+from minicrab.cron.service import CronService
+from minicrab.cron.types import CronJobState, CronSchedule
 
 
 def _make_tool(tmp_path) -> CronTool:
@@ -268,8 +268,11 @@ def test_add_cron_job_defaults_to_tool_timezone(tmp_path) -> None:
 
     result = tool._add_job("Morning standup", None, "0 8 * * *", None, None)
 
-    assert result.startswith("Created job")
     job = tool._cron.list_jobs()[0]
+    assert result.startswith("Reminder scheduled successfully")
+    assert "Morning standup" in result
+    assert "cron: 0 8 * * * (Asia/Shanghai)" in result
+    assert job.id not in result
     assert job.schedule.tz == "Asia/Shanghai"
 
 
@@ -279,8 +282,11 @@ def test_add_at_job_uses_default_timezone_for_naive_datetime(tmp_path) -> None:
 
     result = tool._add_job("Morning reminder", None, None, None, "2099-03-25T08:00:00")
 
-    assert result.startswith("Created job")
     job = tool._cron.list_jobs()[0]
+    assert result.startswith("Reminder scheduled successfully")
+    assert "Morning reminder" in result
+    assert "Asia/Shanghai" in result
+    assert job.id not in result
     expected = int(datetime(2099, 3, 25, 0, 0, 0, tzinfo=timezone.utc).timestamp() * 1000)
     assert job.schedule.at_ms == expected
 
@@ -319,8 +325,11 @@ def test_add_at_job_accepts_future_datetime_with_explicit_offset(tmp_path) -> No
 
     result = tool._add_job("UTC reminder", None, None, None, "2099-03-25T00:00:00+00:00")
 
-    assert result.startswith("Created job")
     job = tool._cron.list_jobs()[0]
+    assert result.startswith("Reminder scheduled successfully")
+    assert "UTC reminder" in result
+    assert "Asia/Shanghai" in result
+    assert job.id not in result
     expected = int(datetime(2099, 3, 25, 0, 0, 0, tzinfo=timezone.utc).timestamp() * 1000)
     assert job.schedule.at_ms == expected
 

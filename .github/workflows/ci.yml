@@ -1,10 +1,10 @@
-name: Test Suite
+name: minicrab tests
 
 on:
   push:
-    branches: [ main, nightly ]
+    branches: [ main, memory-redesign-v1 ]
   pull_request:
-    branches: [ main, nightly ]
+    branches: [ main, memory-redesign-v1 ]
 
 jobs:
   test:

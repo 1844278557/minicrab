@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from nanobot.agent.episode import (
+from minicrab.agent.episode import (
     Episode,
     EpisodeStore,
     EpisodeRetriever,
@@ -51,7 +51,7 @@ class TestEpisode:
             summary="Complete test",
             key_points=["point1", "point2"],
             decisions=["decision1"],
-            entities={"person": ["Alice"], "project": ["nanobot"]},
+            entities={"person": ["Alice"], "project": ["minicrab"]},
             importance=5,
             tags=["important", "feature"],
             raw_messages=[{"role": "user", "content": "hello"}],
@@ -447,7 +447,7 @@ class TestSearchEpisodesTool:
     @pytest.fixture()
     def tool(self, tmp_path: Path):
         """Create a SearchEpisodesTool with sample data."""
-        from nanobot.agent.tools.episode import SearchEpisodesTool
+        from minicrab.agent.tools.episode import SearchEpisodesTool
 
         memory_dir = tmp_path / "memory"
         memory_dir.mkdir()
@@ -494,7 +494,7 @@ class TestListRecentEpisodesTool:
     @pytest.fixture()
     def tool(self, tmp_path: Path):
         """Create a ListRecentEpisodesTool with sample data."""
-        from nanobot.agent.tools.episode import ListRecentEpisodesTool
+        from minicrab.agent.tools.episode import ListRecentEpisodesTool
 
         memory_dir = tmp_path / "memory"
         memory_dir.mkdir()
@@ -539,7 +539,7 @@ class TestGetEpisodeStatsTool:
     @pytest.fixture()
     def tool(self, tmp_path: Path):
         """Create a GetEpisodeStatsTool with sample data."""
-        from nanobot.agent.tools.episode import GetEpisodeStatsTool
+        from minicrab.agent.tools.episode import GetEpisodeStatsTool
 
         memory_dir = tmp_path / "memory"
         memory_dir.mkdir()
