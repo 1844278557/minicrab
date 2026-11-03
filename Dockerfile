@@ -15,7 +15,7 @@ RUN apt-get update && \
 WORKDIR /app
 
 # Install Python dependencies first (cached layer)
-COPY pyproject.toml README.md LICENSE minicrab-logo.png ./
+COPY pyproject.toml README.md THIRD_PARTY_NOTICES minicrab-logo.png ./
 RUN mkdir -p minicrab bridge && touch minicrab/__init__.py && \
     uv pip install --system --no-cache . && \
     rm -rf minicrab bridge

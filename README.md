@@ -205,7 +205,3 @@ minicrab gateway
 ```bash
 minicrab channels login weixin --force
 ```
-
-## 许可证
-
-minicrab 采用 [MIT 许可证](LICENSE)。

@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "A personal AI assistant with memory, document search, and a local web chat"
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.11"
-license = {text = "MIT"}
+license-files = ["THIRD_PARTY_NOTICES"]
 authors = [
     {name = "minicrab contributors"}
 ]
@@ -12,7 +12,6 @@ keywords = ["ai", "agent", "chatbot"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
 ]
@@ -125,7 +124,7 @@ include = [
     "bridge/",
     "README.md",
     "minicrab-logo.png",
-    "LICENSE",
+    "THIRD_PARTY_NOTICES",
 ]
 
 [tool.ruff]
